@@ -114,6 +114,16 @@ test("a wave: logged in full, banned, a campaign alert, the graph and the export
   const who = await get("/api/patterns/who?span=1h&id=sig:env-file");
   assert.equal(who.ips.length, 7);
   assert.ok(who.ips.every((x) => x.n === 1), "tries of that pattern, per address");
+  // the workflow's last stage: what became of each address, and the connections into it
+  const outs = g.flow.outcomes.reduce((a, o) => a + o.ips, 0);
+  assert.equal(outs, g.totals.ips, "every attacker ends up in exactly one outcome");
+  assert.ok(g.flow.outLinks.some((l) => l.a === "sig:env-file" && l.b.startsWith("out:")));
+  assert.ok(g.flow.sigs.find((x) => x.sig === "env-file").examples.some((p) => /\.env/.test(p)), "real requests as examples");
+  const link = g.flow.links.find((l) => l.b === "sig:env-file");
+  const lw = await get(`/api/patterns/who?span=1h&id=${encodeURIComponent(`${link.a}|${link.b}`)}`);
+  assert.equal(lw.ips.length, link.ips, "a connection's addresses");
+  const ol = g.flow.outLinks[0], ow = await get(`/api/patterns/who?span=1h&id=${encodeURIComponent(`${ol.a}|${ol.b}`)}`);
+  assert.equal(ow.ips.length, ol.ips);
   // overview
   const o = await get("/api/overview?span=1h");
   assert.equal(o.totals.req, 15);
@@ -126,6 +136,9 @@ test("a wave: logged in full, banned, a campaign alert, the graph and the export
 
 test("one address in detail: profile, coverage, logs; ban, unban, allow", async () => {
   const v = await get("/api/ip/136.85.34.52");
+  // an IPv6 address, as the drawer asks for it (":" encoded): not "not found"
+  const v6 = await get(`/api/ip/${encodeURIComponent("2001:db8::7")}`);
+  assert.equal(v6.ip, "2001:db8::7");
   assert.equal(v.profile.n, 2);
   assert.deepEqual(v.profile.seq, ["env-file", "vcs"]);
   assert.ok(v.coverage.some((c) => c.vendor === "AbuseIPDB"));

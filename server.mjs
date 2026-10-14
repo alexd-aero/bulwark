@@ -25,7 +25,7 @@ import { loadConfig } from "./core/config.mjs";
 import { Brain, DEFAULT_SETTINGS } from "./core/brain.mjs";
 import { checkIp } from "./core/intel.mjs";
 import { isIP, isPrivate, normIp, netOf } from "./core/net.mjs";
-import { signatureById, SIGNATURES } from "./core/payloads.mjs";
+import { signatureById, SIGNATURES, classify } from "./core/payloads.mjs";
 
 const APP = dirname(fileURLToPath(import.meta.url));
 const VERSION = JSON.parse(readFileSync(join(APP, "package.json"), "utf8")).version;
@@ -108,9 +108,24 @@ export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", 
   // fold into "other". `who` lists the addresses behind one of them.
   const attackers = (since) => brain.profiles.recent(since, 20000).filter((p) => !mine(p) && (Object.keys(p.sigs).length || brain.state.bans[p.ip]));
   const netKey = (p) => (p.asn ? `as:${p.asn}` : "as:0");
+  // what Bulwark did about an address: the last stage of the Patterns graph
+  const OUTCOMES = {
+    "out:payload": { name: "Banned for payloads", what: "Asked for secrets or a way in, so Bulwark banned it everywhere." },
+    "out:lookup": { name: "Banned on reputation", what: "Probed, and the threat lookups agreed it is bad, so Bulwark banned it." },
+    "out:list": { name: "Banned: on a blocklist", what: "Already on a list of known attackers, so it was banned on sight." },
+    "out:manual": { name: "Banned by you", what: "You banned it." },
+    "out:ban": { name: "Banned", what: "Banned for another reason (part of a campaign, say)." },
+    "out:dropped": { name: "Stopped, not banned", what: "Its payload requests were dropped; not enough yet to ban it." },
+    "out:watched": { name: "Watched", what: "Only probes (asking for software that isn't here): counted, answered normally, not banned." },
+  };
+  const outcomeOf = (p) => {
+    const b = brain.state.bans[p.ip];
+    if (b) return b.source === "payload" || b.source === "history" ? "out:payload" : b.source === "lookup" ? "out:lookup" : b.source === "list" ? "out:list" : b.source === "manual" ? "out:manual" : "out:ban";
+    return Object.keys(p.sigs).some((s) => signatureById(s)?.score === 3) ? "out:dropped" : "out:watched";
+  };
   const patterns = (since, { nets: NN = 10, sigs: NS = 14 } = {}) => {
     const ps = attackers(since);
-    const sigs = new Map(), nets = new Map(), links = new Map();
+    const sigs = new Map(), nets = new Map(), links = new Map(), outs = new Map();
     for (const p of ps) {
       const banned = !!brain.state.bans[p.ip], nk = netKey(p);
       const n = nets.get(nk) || { id: nk, asn: p.asn || 0, org: p.org || (p.asn ? `AS${p.asn}` : "unknown network"), dc: !!p.dc, ips: 0, banned: 0, requests: 0 };
@@ -122,6 +137,8 @@ export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", 
         const lk = `${nk}|${sig}`, l = links.get(lk) || { a: nk, b: `sig:${sig}`, ips: 0, requests: 0 };
         l.ips++; l.requests += k; links.set(lk, l);
       }
+      const oc = outcomeOf(p), o = outs.get(oc) || { id: oc, ...OUTCOMES[oc], ips: 0, requests: 0 };
+      o.ips++; o.requests += p.n || 0; outs.set(oc, o);
     }
     // name the busiest; fold the rest (so the flow stays readable at any volume)
     const topNets = [...nets.values()].sort((a, b) => b.ips - a.ips || b.requests - a.requests);
@@ -136,10 +153,29 @@ export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", 
       const k = `${a}|${b}`, f = flowLinks.get(k) || { a, b, ips: 0, requests: 0 };
       f.ips += l.ips; f.requests += l.requests; flowLinks.set(k, f);
     }
+    // pattern -> outcome: the addresses that tried a pattern, by what became of them
+    const sigTo = (sig) => (keepS.has(`sig:${sig}`) ? `sig:${sig}` : signatureById(sig)?.score === 3 ? "sig:other-payload" : "sig:other-probe");
+    const outLinks = new Map();
+    for (const p of ps) {
+      const oc = outcomeOf(p);
+      for (const b of new Set(Object.keys(p.sigs).map(sigTo))) {
+        const k = `${b}|${oc}`, l = outLinks.get(k) || { a: b, b: oc, ips: 0, requests: 0 };
+        l.ips++; l.requests += p.n || 0; outLinks.set(k, l);
+      }
+    }
     const fold = (list, base) => list.reduce((o, x) => { o.ips += x.ips; o.banned += x.banned; o.requests += x.requests; o.count++; return o; }, { ...base, ips: 0, banned: 0, requests: 0, count: 0 });
     const flowNets = topNets.slice(0, NN);
     if (otherN.length) flowNets.push(fold(otherN, { id: "as:other", org: `${otherN.length} other networks`, other: true }));
-    const flowSigs = sigList.filter((x) => keepS.has(x.id));
+    // a few real requests for each named pattern (what it looks like)
+    const examples = new Map();
+    for (const p of ps) for (const path of p.paths || []) {
+      const c = classify(path);
+      if (!c.id || !keepS.has(`sig:${c.id}`)) continue;
+      const ex = examples.get(c.id) || new Set();
+      if (ex.size < 4) ex.add(String(path).slice(0, 90));
+      examples.set(c.id, ex);
+    }
+    const flowSigs = sigList.filter((x) => keepS.has(x.id)).map((x) => ({ ...x, examples: [...(examples.get(x.sig) || [])] }));
     for (const [score, id, label] of [[3, "sig:other-payload", "other payloads"], [1, "sig:other-probe", "other probes"]]) {
       const rest = otherS.filter((x) => (x.score === 3) === (score === 3));
       if (!rest.length) continue;
@@ -157,14 +193,28 @@ export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", 
     return {
       totals: { ips: ps.length, banned: ps.filter((p) => brain.state.bans[p.ip]).length, sigs: sigs.size, nets: nets.size, campaigns: waves.length,
                 requests: [...sigs.values()].reduce((a, x) => a + x.requests, 0) },
-      flow: { nets: flowNets, sigs: flowSigs, links: [...flowLinks.values()] },
+      flow: { nets: flowNets, sigs: flowSigs, links: [...flowLinks.values()],
+              outcomes: Object.keys(OUTCOMES).filter((k) => outs.has(k)).map((k) => outs.get(k)), outLinks: [...outLinks.values()] },
       sigs: sigList, waves,
     };
   };
   // the addresses behind a network, a pattern (or a folded "other"), or a campaign
   const patternWho = (since, id) => {
     const ps = attackers(since), all = patterns(since);
+    // a connection in the graph: the addresses on both ends
+    if (id.includes("|")) {
+      const [a, b] = id.split("|", 2), pa = picker(all, a), pb = picker(all, b);
+      const sig = b.startsWith("sig:") && !b.startsWith("sig:other") ? b.slice(4) : a.startsWith("sig:") && !a.startsWith("sig:other") && !b.startsWith("out:") ? a.slice(4) : null;
+      return listOf(ps.filter((p) => pa(p) && pb(p)), sig);
+    }
+    const sig = id.startsWith("sig:") && !id.startsWith("sig:other") ? id.slice(4) : null;
+    return listOf(ps.filter(picker(all, id)), sig);
+  };
+  const listOf = (ps, sig) => ps.map((p) => ({ ip: p.ip, cc: p.cc, org: p.org, dc: !!p.dc, n: sig ? p.sigs[sig] : p.n, banned: !!brain.state.bans[p.ip], last: p.last }))
+    .sort((a, b) => b.n - a.n).slice(0, 500);
+  const picker = (all, id) => {
     let pick;
+    if (id.startsWith("out:")) return (p) => outcomeOf(p) === id;
     if (id.startsWith("wave:")) { const w = brain.waves.list(50).find((x) => `wave:${x.key}` === id); const m = new Set(w?.members || []); pick = (p) => m.has(p.ip); }
     else if (id === "as:other") { const keep = new Set(all.flow.nets.filter((n) => !n.other).map((n) => n.id)); pick = (p) => !keep.has(netKey(p)); }
     else if (id.startsWith("as:")) pick = (p) => netKey(p) === id;
@@ -172,9 +222,7 @@ export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", 
       const keep = new Set(all.flow.sigs.filter((x) => !x.other).map((x) => x.sig)), pay = id === "sig:other-payload";
       pick = (p) => Object.keys(p.sigs).some((s) => !keep.has(s) && ((signatureById(s)?.score === 3) === pay));
     } else { const sig = id.slice(4); pick = (p) => sig in p.sigs; }
-    const sig = id.startsWith("sig:") && !id.startsWith("sig:other") ? id.slice(4) : null;
-    return ps.filter(pick).map((p) => ({ ip: p.ip, cc: p.cc, org: p.org, dc: !!p.dc, n: sig ? p.sigs[sig] : p.n, banned: !!brain.state.bans[p.ip], last: p.last }))
-      .sort((a, b) => b.n - a.n).slice(0, 500);
+    return pick;
   };
   const exportList = (format) => {
     const bans = brain.bansList();
@@ -221,9 +269,10 @@ export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", 
       req.on("close", () => { offLog(); offAlert(); clearInterval(ping); });
       return;
     }
-    const ipm = /^\/ip\/([0-9a-fA-F.:]{3,45})(?:\/(ban|unban|allow|disallow|report))?$/.exec(path);
+    // an IPv6 address may come encoded (":" as %3A)
+    const ipm = /^\/ip\/((?:[0-9a-fA-F.:]|%3[aA]){3,90})(?:\/(ban|unban|allow|disallow|report))?$/.exec(path);
     if (ipm) {
-      const ip = normIp(ipm[1]);
+      const ip = normIp(ipm[1].replace(/%3a/gi, ":"));
       if (!isIP(ip)) return send(res, 400, { error: "That isn't an IP address." });
       if (!ipm[2] && m === "GET") return send(res, 200, await ipView(ip));
       if (m !== "POST") return send(res, 405, { error: "POST" });

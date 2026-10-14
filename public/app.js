@@ -1,7 +1,8 @@
 // Bulwark's dashboard. Plain modules, no build step, no inline handlers (strict CSP):
 // everything is wired through data-act attributes and one delegated listener.
 // All paths are relative, so it works at / and under a host's mount (/__gate/bulwark/).
-import { TimeChart, Heatmap, Flow, fmtN, netName } from "./charts.js";
+import { TimeChart, Heatmap, fmtN, netName } from "./charts.js";
+import { Workflow } from "./graph.js";
 
 const $ = (s, el = document) => el.querySelector(s);
 const app = $("#app");
@@ -208,7 +209,7 @@ function renderWaves() {
 const kindOf = (x) => (x.score === 3 ? "payload" : "probe");
 async function renderPatterns() {
   app.innerHTML = `
-    <div class="head"><div><h1>Patterns</h1><p>Every stranger that attacked: the networks they came from, what they tried, and the campaigns they joined. Hover to trace, click for the addresses.</p></div>
+    <div class="head"><div><h1>Patterns</h1><p>Every stranger that attacked: where they came from, what they tried, what Bulwark did, and the campaigns they joined. Click anything for the addresses behind it.</p></div>
       <div class="spacer"></div>${seg("gspan", S.gspan, ["1h", "6h", "24h", "7d", "30d"])}</div>
     <div id="patBody"><p class="muted"><span class="spin"></span> Loading…</p></div>`;
   const d = S.pat = await api(`patterns?span=${S.gspan}`);
@@ -234,8 +235,8 @@ async function renderPatterns() {
       <div class="card stat ${T.campaigns ? "warm" : ""}"><b>${fmtN(T.campaigns)}</b><span>campaigns</span><div class="sub">many addresses, one playbook</div></div>
     </div>
     <section class="card flow-card">
-      <div class="row flow-head"><div><h3>Who tried what</h3><p class="muted small">Ribbon width: how many addresses from that network tried that pattern. The busiest are named; the rest are folded into "other".</p></div>
-        <span class="spacer"></span><div class="flow-legend"><span><i style="background:#9aa3ae"></i>network</span><span><i style="background:#ff5a52"></i>payload: after secrets or a way in</span><span><i style="background:#f2b53c"></i>probe: looking for software</span></div></div>
+      <div class="row flow-head"><div><h3>The attack workflow</h3><p class="muted small">Where attackers come from, what they tried, and what Bulwark did about it. A line's width is how many addresses took that path; the busiest are named, the rest folded into "other".</p></div>
+        <span class="spacer"></span><div class="flow-legend"><span><i style="background:var(--pass-hi)"></i>network</span><span><i style="background:var(--block)"></i>payload</span><span><i style="background:var(--drop)"></i>probe</span><span><i style="background:var(--ban)"></i>banned</span></div></div>
       <div id="flow"></div></section>
     <div class="grid pat-two">
       <section class="card"><h3>Every pattern <span class="faint">${d.sigs.length}</span></h3>
@@ -244,7 +245,15 @@ async function renderPatterns() {
       <section class="card"><h3>Campaigns <span class="faint">${d.waves.length}</span></h3>
         ${d.waves.length ? `<div class="wave-list">${d.waves.map(waveCard).join("")}</div>` : '<p class="muted small">None in this window. A campaign is many addresses running the same playbook at once (Waves has the details).</p>'}</section>
     </div>`;
-  if (T.ips) { charts.flow = new Flow($("#flow"), { onPick: (n) => openPop(n.id, n.org || n.name) }); charts.flow.set(d.flow); }
+  if (T.ips) {
+    charts.flow = new Workflow($("#flow"), {
+      span: S.gspan,
+      who: async (id) => (await api(`patterns/who?span=${S.gspan}&id=${encodeURIComponent(id)}`)).ips,
+      onIp: (ip) => openIp(ip),
+      onLog: (sig) => { S.logF = { ...S.logF, sig }; location.hash = "#/log"; },
+    });
+    charts.flow.set(d.flow);
+  }
 }
 // A network, a pattern or a campaign, clicked: the addresses behind it, right here.
 async function openPop(id, label) {
@@ -418,8 +427,14 @@ async function hostDevices(method, id, body) {
 async function openIp(ip) {
   const d = $("#drawer"), inn = $("#drawerIn");
   d.classList.add("open"); d.setAttribute("aria-hidden", "false");
-  inn.innerHTML = `<h2>${h(ip)}</h2><p class="muted"><span class="spin"></span> Asking everyone about it…</p>`;
-  try { S.ip = await api("ip/" + encodeURIComponent(ip)); drawIp(); } catch (e) { inn.innerHTML = `<h2>${h(ip)}</h2><p class="st5">${h(e.message)}</p>`; }
+  const head = `<div class="row"><h2>${h(ip)}</h2><span class="spacer"></span><button class="btn sm ghost" data-act="closedrawer" aria-label="Close">✕</button></div>`;
+  S.ipOpen = ip;
+  inn.innerHTML = `${head}<p class="muted"><span class="spin"></span> Asking everyone about it…</p>`;
+  try {
+    const v = await api("ip/" + encodeURIComponent(ip));
+    if (S.ipOpen !== ip) return;                      // closed, or another opened meanwhile
+    S.ip = v; drawIp();
+  } catch (e) { if (S.ipOpen === ip) inn.innerHTML = `${head}<p class="st5">${h(e.message)}</p>`; }
 }
 function drawIp() {
   const v = S.ip, p = v.profile, a = v.asn, i = v.intel || {}, o = i.owner || {};
@@ -450,7 +465,7 @@ function drawIp() {
     <section class="card"><h3>Its requests <span class="faint">${v.logs.length}</span></h3>${v.logs.length ? `<div class="scroll" style="max-height:420px"><table class="logtable"><tbody>${v.logs.map((e) => `<tr class="d-${h(e.dec)}"><td class="faint mono">${new Date(e.t).toLocaleString()}</td><td>${decPill(e.dec)}</td><td class="mono path" title="${h(e.path)}">${h(e.m)} ${h(e.path)}</td><td class="mono st${String(e.st || 0)[0]}">${e.st || ""}</td></tr>`).join("")}</tbody></table></div>` : '<p class="faint small">None on record.</p>'}</section>`;
 }
 const line = (name, x, fmt) => `<dt>${name}</dt><dd>${x?.error ? `<span class="faint">couldn't ask: ${h(x.error)}</span>` : h(fmt(x?.result))}</dd>`;
-function closeDrawer() { $("#drawer").classList.remove("open"); $("#drawer").setAttribute("aria-hidden", "true"); S.ip = null; }
+function closeDrawer() { $("#drawer").classList.remove("open"); $("#drawer").setAttribute("aria-hidden", "true"); S.ip = null; S.ipOpen = null; }
 
 // ------------------------------------------------------------------ chrome, routing, live
 function chrome() {
@@ -517,7 +532,7 @@ function live() {
 document.addEventListener("click", async (e) => {
   const el = e.target.closest("[data-act]");
   if (!el) {
-    if (S.ip && !e.target.closest("#drawer")) closeDrawer();
+    if ($("#drawer").classList.contains("open") && !e.target.closest("#drawer")) closeDrawer();
     else if (e.target.id === "pop") closePop();
     return;
   }
@@ -526,7 +541,11 @@ document.addEventListener("click", async (e) => {
   try {
     if (act === "span") { S.span = el.dataset.v; localStore("span", S.span); await loadOverview(); renderOverview(); }
     else if (act === "gspan") { S.gspan = el.dataset.v; renderPatterns(); }
-    else if (act === "patpick") openPop(el.dataset.id);
+    else if (act === "patpick") {
+      // on the graph: pick it there (the panel has everything); a campaign or a folded pattern: the list
+      if (charts.flow?.has(el.dataset.id)) { charts.flow.select({ node: el.dataset.id }, { toggle: false }); $("#flow").scrollIntoView({ behavior: "smooth", block: "center" }); }
+      else openPop(el.dataset.id);
+    }
     else if (act === "ip") { e.stopPropagation(); openIp(ip); }
     else if (act === "closedrawer") closeDrawer();
     else if (act === "devname") {
@@ -575,7 +594,7 @@ document.addEventListener("input", (e) => {
   clearTimeout(qTimer); qTimer = setTimeout(async () => { S.logF.q = e.target.value.trim(); await loadLog(); renderLog(); }, 300);
 });
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") { if (S.ip) closeDrawer(); else closePop(); }
+  if (e.key === "Escape") { if ($("#drawer").classList.contains("open")) closeDrawer(); else closePop(); }
   if (e.key === "Enter" && e.target.id === "banIp") $('[data-act="banit"]').click();
   if (e.key === "Enter" && e.target.id === "allowIp") $('[data-act="allowit"]').click();
 });

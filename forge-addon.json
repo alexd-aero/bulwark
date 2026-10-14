@@ -2,7 +2,7 @@
   "spec": 1,
   "id": "bulwark",
   "name": "Bulwark",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "A shield for everything you publish. Every request is checked in microseconds against 250k+ blocklisted addresses and known attack payloads; attackers are banned on every tunnel at once. Its own dashboard shows every request in full, warns about waves of attackers before they peak, graphs the patterns, keeps your blocklist and reports attackers to the vendors that missed them. On by default; no slower tunnels.",
   "author": "Alexd Aero",
   "license": "MIT",
@@ -14,13 +14,12 @@
     "style": "glow",
     "badge": "PROTECTION",
     "title": "{name} {version}",
-    "tagline": "See who attacks you, and how, at a glance.",
+    "tagline": "Patterns is now a workflow you can click through.",
     "highlights": [
-      "Patterns, rebuilt: a clear flow from networks to attacks",
-      "Every pattern ranked; campaigns as cards",
-      "Your devices, recognized by their device keys",
-      "Public tunnels scan new visitors before letting them in",
-      "Fixed: history lines showing twice in the log"
+      "Patterns as a workflow: where attackers come from, what they tried, what Bulwark did",
+      "Click any card or line for the addresses behind it, with real example requests",
+      "Drag, zoom and pan the canvas; Fit and Tidy up bring it back",
+      "Fixed: an IPv6 address opened as \"not found\", and its panel couldn't be closed"
     ],
     "button": "Update to {version}",
     "notes": "https://github.com/alexd-aero/bulwark/commits/main"
