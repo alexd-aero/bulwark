@@ -37,6 +37,14 @@ const MIN = 60e3, HOUR = 60 * MIN, DAY = 24 * HOUR;
 export const DEFAULT_SETTINGS = { auto: true, drop: true, lookups: true, report: true, abuseipdbKey: "", ntfy: "", webhook: "", keepDays: 30, strict: true, hostNotices: true };
 const atomic = (file, obj) => { writeFileSync(file + ".tmp", JSON.stringify(obj)); renameSync(file + ".tmp", file); };
 
+// A ban's reason, for a notice row: the gate's sign-in detour undone (the path
+// the visitor really asked for), URLs and long lists trimmed.
+export function shortReason(r) {
+  return String(r || "")
+    .replace(/\/__gate\/sso\?[^ ,)]*?next=([^ ,)&]+)[^ ,)]*/g, (_, n) => { try { return decodeURIComponent(n); } catch { return n; } })
+    .replace(/https?:\/\/\S+/g, "…").replace(/\s+/g, " ").trim().slice(0, 110);
+}
+
 export class Brain {
   constructor({ home, log, fetchImpl, offline = false, remote }) {
     this.home = home; this.P = paths(home);
@@ -210,8 +218,7 @@ export class Brain {
     this.dirty = true;
     if (fresh.length || banned.length) this.log(`history from ${host}: ${fresh.length} new lines, ${ips.size} addresses${banned.length ? `, banned ${banned.join(", ")}` : ""}`);
     if (banned.length) this.hostNotice({ level: "warn", key: "history", link: "/__gate/bulwark/#/addresses",
-      title: `Bulwark found ${banned.length} attacker${banned.length > 1 ? "s" : ""} in Aegis's history`,
-      body: banned.slice(0, 6).map((ip) => `${ip}: ${this.state.bans[ip]?.reason || ""}`).join("\n") });
+      title: "Bulwark found {n} {attacker|attackers} in Aegis's history", items: banned.map((ip) => this.noticeItem(ip, null, "history")) });
     return H.last;
   }
 
@@ -249,17 +256,21 @@ export class Brain {
     if (this.settings.hostNotices === false || !this.sensors.size) return;
     this.broadcast({ t: "notify", ...n });
   }
-  // bans come in bursts: one notice a minute at most, the same one updated while unread
+  // one address as a row of a notice: flag, address, why in a few words, what kind
+  noticeItem(ip, reason, source) {
+    const p = this.profiles.get(ip), b = this.state.bans[ip];
+    return { label: ip, cc: p?.cc || b?.country || "", t: Date.now(), link: `/__gate/bulwark/#/ip/${encodeURIComponent(ip)}`,
+             sub: [p?.org, shortReason(reason || b?.reason || "")].filter(Boolean).join(" · "),
+             tag: { list: "blocklist", payload: "payloads", lookup: "known attacker", history: "history", campaign: "campaign" }[source || b?.source] || "" };
+  }
+  // bans come in bursts: sent once a minute, and the host adds them to the unread notice
   noteBan(ip, reason) {
-    (this.banNotes ||= []).push({ ip, reason, cc: this.profiles.get(ip)?.cc || "", org: this.profiles.get(ip)?.org || "" });
+    (this.banNotes ||= []).push(this.noticeItem(ip, reason));
     if (this.banNoteTimer) return;
     this.banNoteTimer = setTimeout(() => {
       this.banNoteTimer = null;
-      const list = this.banNotes.splice(0);
-      if (!list.length) return;
-      this.hostNotice({ level: "warn", key: "bans", link: "/__gate/bulwark/#/addresses",
-        title: list.length === 1 ? `Bulwark banned ${list[0].ip}` : `Bulwark banned ${list.length} addresses`,
-        body: list.slice(0, 6).map((b) => `${b.ip}${b.cc || b.org ? ` (${[b.cc, b.org].filter(Boolean).join(" · ")})` : ""}: ${b.reason}`).join("\n") + (list.length > 6 ? `\n…and ${list.length - 6} more` : "") });
+      const items = this.banNotes.splice(0);
+      if (items.length) this.hostNotice({ level: "warn", key: "bans", link: "/__gate/bulwark/#/addresses", title: "Bulwark banned {n} {address|addresses}", items });
     }, 60e3);
     this.banNoteTimer.unref?.();
   }
@@ -425,8 +436,8 @@ export class Brain {
     for (const fn of this.alertSubs || []) { try { fn(a, change); } catch { /* closed */ } }
     this.reporters.notify(a, change).catch(() => {});
     if (change !== "closed" && (a.sev === "warn" || a.sev === "critical")) {
-      this.hostNotice({ level: a.sev, key: `wave:${a.key}`, link: "/__gate/bulwark/#/waves", title: `Bulwark: ${a.title}`,
-        body: `${a.detail || ""}${a.members?.length ? `\n${a.members.length} addresses: ${a.members.slice(0, 6).join(", ")}${a.members.length > 6 ? "…" : ""}` : ""}` });
+      this.hostNotice({ level: a.sev, key: `wave:${a.key}`, link: "/__gate/bulwark/#/waves", title: `${a.sev === "critical" ? "Attack wave" : "Wave"}: ${a.title}`, body: a.detail || "",
+        items: (a.members || []).slice(0, 40).map((ip) => this.noticeItem(ip, this.state.bans[ip] ? null : "in this wave")) });
     }
     // a campaign's members are reported as one (evidence: the same play from many)
     if (a.kind === "campaign" && a.sev !== "info") for (const ip of a.members) if (this.state.bans[ip]) this.reporters.enqueue({ ip, ...this.state.bans[ip], source: "campaign", reason: `${this.state.bans[ip].reason}; part of a campaign of ${a.members.length} addresses` });

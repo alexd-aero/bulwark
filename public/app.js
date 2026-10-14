@@ -391,7 +391,13 @@ async function show(view) {
 }
 // the way back to the host's dashboard, when Bulwark is opened through one (Aegis: /__gate/bulwark/)
 if (location.pathname.startsWith("/__gate/")) { const b = $("#backHost"); if (b) b.hidden = false; }
-function route() { closePop(); show((location.hash.replace(/^#\/?/, "") || "overview").split("?")[0]); }
+function route() {
+  closePop();
+  // #/ip/<address> (a notice on the host's dashboard links here): the address, over the overview
+  const ip = /^#\/ip\/(.+)$/.exec(location.hash)?.[1];
+  if (ip) { if (S.view !== "overview" || !S.ov) show("overview"); openIp(decodeURIComponent(ip)); return; }
+  show((location.hash.replace(/^#\/?/, "") || "overview").split("?")[0]);
+}
 window.addEventListener("hashchange", route);
 
 // refresh what's on screen (not the log: that one is live)

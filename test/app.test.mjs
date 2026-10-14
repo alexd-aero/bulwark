@@ -27,6 +27,8 @@ const base = () => `http://127.0.0.1:${app.server.address().port}`;
 const get = (p) => fetch(base() + p, { headers: { "x-bulwark-key": "k" } }).then((r) => r.json());
 const post = (p, b = {}) => fetch(base() + p, { method: "POST", headers: { "x-bulwark-key": "k", "Content-Type": "application/json" }, body: JSON.stringify(b) }).then((r) => r.json());
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// wait for something the app does in its own time (a fixed sleep is flaky under load)
+const until = async (fn, ms = 4000) => { const t = Date.now(); while (!(await fn())) { if (Date.now() - t > ms) return false; await sleep(25); } return true; };
 await new Promise((r) => app.server.once("listening", r).listening ? r() : null);
 await sleep(100);
 
@@ -157,7 +159,7 @@ test("the host's past: Aegis's history comes in once, attackers in it are banned
   };
   got.length = 0;
   tell({ t: "history", host: "aegis-burrow", data });
-  await sleep(200);
+  await until(() => app.brain.state.history?.last?.rows && got.some((m) => m.t === "notify" && m.key === "history"));
   const b = app.brain.state.bans["198.51.100.40"];
   assert.ok(b, "two payloads in the past: banned now");
   assert.equal(b.source, "history");
@@ -167,10 +169,12 @@ test("the host's past: Aegis's history comes in once, attackers in it are banned
   assert.equal(rows.length, 2); assert.equal(rows[0].dec, "seen"); assert.equal(rows[0].src, "aegis-burrow");
   assert.ok(app.brain.profiles.get("198.51.100.42"), "a failed sign-in's address is known");
   const n = got.find((m) => m.t === "notify" && m.key === "history");
-  assert.ok(n, "the dashboard hears of it"); assert.equal(n.level, "warn"); assert.match(n.title, /found 1 attacker/);
+  assert.ok(n, "the dashboard hears of it"); assert.equal(n.level, "warn"); assert.match(n.title, /found \{n\} \{attacker\|attackers\}/);
+  assert.deepEqual([n.items[0].label, n.items[0].cc, n.items[0].tag, n.items[0].link], ["198.51.100.40", "DE", "history", "/__gate/bulwark/#/ip/198.51.100.40"]);
   // the same history again: nothing new
+  const at = app.brain.state.history.last.at;
   tell({ t: "history", host: "aegis-burrow", data });
-  await sleep(150);
+  await until(() => app.brain.state.history.last.at !== at);
   assert.equal((await get("/api/logs?ip=198.51.100.40")).logs.length, 2, "not twice");
   assert.equal((await get("/api/history")).last.rows, 0);
   // the setting turns the dashboard warnings off
@@ -207,4 +211,10 @@ test("newer patterns, older lines: the log is read again and what slipped throug
   assert.ok(r.banned.includes("198.51.100.77"));
   assert.match(app.brain.state.bans["198.51.100.77"].reason, /newer patterns.*3 payloads/);
   assert.equal(app.brain.rescan().banned.length, 0, "once is enough");
+});
+
+test("a notice row's reason: the sign-in detour undone, trimmed", async () => {
+  const { shortReason } = await import("../core/brain.mjs");
+  assert.equal(shortReason("18 payloads (/js/raif_ch.js, /__gate/sso?to=8790.tunnel.example&next=%2Fjs%2Ftwint_ch.js)"), "18 payloads (/js/raif_ch.js, /js/twint_ch.js)");
+  assert.ok(shortReason("x".repeat(300)).length <= 110);
 });
