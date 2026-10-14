@@ -72,7 +72,7 @@ export class Logs {
     const out = [];
     for (let i = this.ring.length - 1; i >= 0 && out.length < limit; i--) if (Logs.match(this.ring[i], f, q)) out.push(this.ring[i]);
     // older than memory: the day files, newest first
-    const oldest = this.ring[0]?.t ?? Date.now();
+    const oldest = this.ring[0]?.t ?? Date.now(), firstId = this.ring[0]?.id || 0;
     if (out.length < limit && (!f.since || f.since < oldest)) {
       const until = Math.min(f.until || Infinity, oldest - 1);
       for (const d of this.days().reverse()) {
@@ -82,6 +82,8 @@ export class Logs {
         const rl = createInterface({ input: createReadStream(join(this.dir, d + ".jsonl")), crlfDelay: Infinity });
         for await (const l of rl) {
           let e; try { e = JSON.parse(l); } catch { continue; }
+          // still in memory (read above): history lines carry old times, so time alone doesn't tell
+          if (firstId && e.id >= firstId) continue;
           if (e.t <= until && Logs.match(e, f, q)) { hits.push(e); if (hits.length > limit) hits.shift(); }
         }
         for (let i = hits.length - 1; i >= 0 && out.length < limit; i--) out.push(hits[i]);

@@ -102,27 +102,79 @@ export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", 
     };
   };
   // the patterns graph: addresses linked to what they asked for and who holds them
-  const graph = (since) => {
-    const ips = brain.profiles.recent(since, 20000).filter((p) => !mine(p) && (Object.keys(p.sigs).length || brain.state.bans[p.ip]))
-      .sort((a, b) => b.n - a.n).slice(0, 160);
-    const nodes = new Map(), edges = [];
-    const node = (id, x) => { if (!nodes.has(id)) nodes.set(id, { id, ...x, w: 0 }); return nodes.get(id); };
-    for (const p of ips) {
-      const ban = brain.state.bans[p.ip];
-      node(`ip:${p.ip}`, { kind: "ip", label: p.ip, cc: p.cc, org: p.org, banned: !!ban, n: p.n, dc: !!p.dc }).w += p.n;
-      for (const [sig, n] of Object.entries(p.sigs)) {
-        const s = signatureById(sig);
-        node(`sig:${sig}`, { kind: "sig", label: s?.name || sig, score: s?.score || 0 }).w += n;
-        edges.push({ a: `ip:${p.ip}`, b: `sig:${sig}`, w: n });
+  // The Patterns page: who tried what, organized. Every stranger that attacked in
+  // the window, folded into networks (left) and patterns (right); links count
+  // distinct addresses. The busiest networks and patterns are named, the rest
+  // fold into "other". `who` lists the addresses behind one of them.
+  const attackers = (since) => brain.profiles.recent(since, 20000).filter((p) => !mine(p) && (Object.keys(p.sigs).length || brain.state.bans[p.ip]));
+  const netKey = (p) => (p.asn ? `as:${p.asn}` : "as:0");
+  const patterns = (since, { nets: NN = 10, sigs: NS = 14 } = {}) => {
+    const ps = attackers(since);
+    const sigs = new Map(), nets = new Map(), links = new Map();
+    for (const p of ps) {
+      const banned = !!brain.state.bans[p.ip], nk = netKey(p);
+      const n = nets.get(nk) || { id: nk, asn: p.asn || 0, org: p.org || (p.asn ? `AS${p.asn}` : "unknown network"), dc: !!p.dc, ips: 0, banned: 0, requests: 0 };
+      n.ips++; n.banned += banned; n.requests += p.n || 0; nets.set(nk, n);
+      for (const [sig, k] of Object.entries(p.sigs)) {
+        const def = signatureById(sig);
+        const x = sigs.get(sig) || { id: `sig:${sig}`, sig, name: def?.name || sig, score: def?.score || 0, ips: 0, banned: 0, requests: 0, last: 0 };
+        x.ips++; x.banned += banned; x.requests += k; x.last = Math.max(x.last, p.last || 0); sigs.set(sig, x);
+        const lk = `${nk}|${sig}`, l = links.get(lk) || { a: nk, b: `sig:${sig}`, ips: 0, requests: 0 };
+        l.ips++; l.requests += k; links.set(lk, l);
       }
-      if (p.asn) { node(`as:${p.asn}`, { kind: "as", label: p.org || `AS${p.asn}`, dc: !!p.dc }).w += 1; edges.push({ a: `ip:${p.ip}`, b: `as:${p.asn}`, w: 1 }); }
     }
-    for (const a of brain.waves.list(50).filter((x) => x.kind === "campaign" && x.last >= since)) {
-      const id = `wave:${a.key}`;
-      node(id, { kind: "wave", label: a.title, sev: a.sev, open: a.open }).w += a.members.length;
-      for (const ip of a.members) if (nodes.has(`ip:${ip}`)) edges.push({ a: id, b: `ip:${ip}`, w: 2 });
+    // name the busiest; fold the rest (so the flow stays readable at any volume)
+    const topNets = [...nets.values()].sort((a, b) => b.ips - a.ips || b.requests - a.requests);
+    const keepN = new Set(topNets.slice(0, NN).map((n) => n.id));
+    const otherN = topNets.slice(NN), sigList = [...sigs.values()].sort((a, b) => b.ips - a.ips || b.requests - a.requests);
+    const keepS = new Set([...sigList.filter((x) => x.score === 3).slice(0, Math.ceil(NS * 0.6)), ...sigList.filter((x) => x.score !== 3).slice(0, Math.floor(NS * 0.4))].map((x) => x.id));
+    const otherS = sigList.filter((x) => !keepS.has(x.id));
+    const flowLinks = new Map();
+    for (const l of links.values()) {
+      const s = sigs.get(l.b.slice(4));
+      const a = keepN.has(l.a) ? l.a : "as:other", b = keepS.has(l.b) ? l.b : (s.score === 3 ? "sig:other-payload" : "sig:other-probe");
+      const k = `${a}|${b}`, f = flowLinks.get(k) || { a, b, ips: 0, requests: 0 };
+      f.ips += l.ips; f.requests += l.requests; flowLinks.set(k, f);
     }
-    return { nodes: [...nodes.values()], edges };
+    const fold = (list, base) => list.reduce((o, x) => { o.ips += x.ips; o.banned += x.banned; o.requests += x.requests; o.count++; return o; }, { ...base, ips: 0, banned: 0, requests: 0, count: 0 });
+    const flowNets = topNets.slice(0, NN);
+    if (otherN.length) flowNets.push(fold(otherN, { id: "as:other", org: `${otherN.length} other networks`, other: true }));
+    const flowSigs = sigList.filter((x) => keepS.has(x.id));
+    for (const [score, id, label] of [[3, "sig:other-payload", "other payloads"], [1, "sig:other-probe", "other probes"]]) {
+      const rest = otherS.filter((x) => (x.score === 3) === (score === 3));
+      if (!rest.length) continue;
+      // an address that tried several of them counts once
+      const ids = new Set(rest.map((x) => x.sig)), who = ps.filter((p) => Object.keys(p.sigs).some((k) => ids.has(k)));
+      flowSigs.push({ ...fold(rest, { id, score, other: true }), name: `${rest.length} ${label}`, ips: who.length, banned: who.filter((p) => brain.state.bans[p.ip]).length });
+    }
+    const waves = brain.waves.list(50).filter((x) => x.kind === "campaign" && x.last >= since).map((w) => {
+      const tally = new Map();
+      for (const ip of w.members) for (const sig of Object.keys(brain.profiles.get(ip)?.sigs || {})) tally.set(sig, (tally.get(sig) || 0) + 1);
+      return { id: `wave:${w.key}`, title: w.title, sev: w.sev, open: w.open, first: w.first, last: w.last, members: w.members.length,
+               banned: w.members.filter((ip) => brain.state.bans[ip]).length,
+               sigs: [...tally].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([sig]) => signatureById(sig)?.name || sig) };
+    });
+    return {
+      totals: { ips: ps.length, banned: ps.filter((p) => brain.state.bans[p.ip]).length, sigs: sigs.size, nets: nets.size, campaigns: waves.length,
+                requests: [...sigs.values()].reduce((a, x) => a + x.requests, 0) },
+      flow: { nets: flowNets, sigs: flowSigs, links: [...flowLinks.values()] },
+      sigs: sigList, waves,
+    };
+  };
+  // the addresses behind a network, a pattern (or a folded "other"), or a campaign
+  const patternWho = (since, id) => {
+    const ps = attackers(since), all = patterns(since);
+    let pick;
+    if (id.startsWith("wave:")) { const w = brain.waves.list(50).find((x) => `wave:${x.key}` === id); const m = new Set(w?.members || []); pick = (p) => m.has(p.ip); }
+    else if (id === "as:other") { const keep = new Set(all.flow.nets.filter((n) => !n.other).map((n) => n.id)); pick = (p) => !keep.has(netKey(p)); }
+    else if (id.startsWith("as:")) pick = (p) => netKey(p) === id;
+    else if (id === "sig:other-payload" || id === "sig:other-probe") {
+      const keep = new Set(all.flow.sigs.filter((x) => !x.other).map((x) => x.sig)), pay = id === "sig:other-payload";
+      pick = (p) => Object.keys(p.sigs).some((s) => !keep.has(s) && ((signatureById(s)?.score === 3) === pay));
+    } else { const sig = id.slice(4); pick = (p) => sig in p.sigs; }
+    const sig = id.startsWith("sig:") && !id.startsWith("sig:other") ? id.slice(4) : null;
+    return ps.filter(pick).map((p) => ({ ip: p.ip, cc: p.cc, org: p.org, dc: !!p.dc, n: sig ? p.sigs[sig] : p.n, banned: !!brain.state.bans[p.ip], last: p.last }))
+      .sort((a, b) => b.n - a.n).slice(0, 500);
   };
   const exportList = (format) => {
     const bans = brain.bansList();
@@ -201,7 +253,8 @@ export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", 
       if (a && a.open) { a.open = false; a.closed = Date.now(); a.dismissed = true; }
       return send(res, 200, { alerts: brain.waves.list(200) });
     }
-    if (path === "/graph" && m === "GET") return send(res, 200, graph(Date.now() - (SPANS[q.span] || DAY)));
+    if (path === "/patterns" && m === "GET") return send(res, 200, patterns(Date.now() - (SPANS[q.span] || DAY)));
+    if (path === "/patterns/who" && m === "GET") return send(res, 200, { ips: patternWho(Date.now() - (SPANS[q.span] || DAY), String(q.id || "")) });
     if (path === "/blocklist" && m === "GET" && q.since) {
       const since = Number(q.since) || 0;
       return send(res, 200, { bans: brain.bansList().filter((b) => (b.at || 0) > since), total: brain.bansList().length, now: Date.now() });

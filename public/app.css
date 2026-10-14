@@ -106,12 +106,6 @@ td.why { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-spac
 .tip { position: absolute; pointer-events: none; background: rgba(13,15,18,.96); border: 1px solid var(--line-2); border-radius: 9px; padding: 8px 10px; font-size: 12px; min-width: 160px; box-shadow: 0 10px 30px rgba(0,0,0,.5); z-index: 5; display: none; }
 .tip .t { color: var(--muted); font: 11px var(--mono); margin-bottom: 4px; }
 .tip .r { display: flex; justify-content: space-between; gap: 14px; } .tip .r i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; }
-.graphwrap { position: relative; height: 680px; border-radius: var(--r); overflow: hidden; background: radial-gradient(800px 500px at 50% 40%, #12151a, #0a0b0d); border: 1px solid var(--line); }
-.graphwrap canvas { width: 100%; height: 100%; display: block; cursor: grab; }
-.graphwrap canvas.drag { cursor: grabbing; }
-.graph-legend { position: absolute; left: 14px; bottom: 12px; display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--muted); background: rgba(10,11,13,.75); padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line); }
-.graph-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
-.graph-hud { position: absolute; right: 12px; top: 12px; display: flex; gap: 6px; }
 
 /* ---- alerts ---- */
 .alert { border: 1px solid var(--line); border-radius: var(--r); padding: 14px 16px; background: var(--card); display: grid; gap: 8px; position: relative; overflow: hidden; }
@@ -173,8 +167,7 @@ td.why { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-spac
   main { padding: 18px 16px 50px; }
   .g2, .g4 { grid-template-columns: minmax(0, 1fr); }
   .kv { grid-template-columns: 110px minmax(0, 1fr); }
-  .graphwrap { height: 480px; }
-}
+  }
 
 /* the way back to the host */
 .backhost { display: flex; align-items: center; gap: 10px; margin: -4px 0 14px; padding: 8px 10px; border-radius: 10px; color: var(--muted); font-size: 13px; border: 1px solid var(--line-2); text-decoration: none; }
@@ -213,3 +206,57 @@ td.why { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-spac
 @media (max-width: 720px) { .dev-how-in { grid-template-columns: 1fr; } .dev-ip { grid-template-columns: 1fr auto; } .dev-ip > .faint:nth-child(2) { grid-column: 1 / -1; order: 3; } }
 .dev-how { margin-bottom: 14px; }
 .pill.check { color: #7aa7ff; border-color: rgba(122,167,255,.35); background: rgba(122,167,255,.06); }
+
+/* Patterns: totals, the flow, every pattern, campaigns */
+.g5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.pat-stats { margin-bottom: 14px; }
+.flow-card { margin-bottom: 14px; padding-bottom: 20px; }
+.flow-head { align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+.flow-head h3 { margin: 0 0 4px; }
+.flow-head p { margin: 0; max-width: 560px; }
+.flow-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+.flow-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+.flow { position: relative; width: 100%; }
+.flow svg { display: block; width: 100%; overflow: visible; }
+.flow .tip { display: block; opacity: 0; transition: opacity .12s; max-width: 300px; }
+.flow .tip b { display: block; color: var(--text); font-weight: 600; margin-bottom: 2px; }
+.flow .tip span { display: block; color: var(--muted); }
+.flow .tip em { display: block; color: var(--faint); font-style: normal; margin-top: 4px; font-size: 11px; }
+.fl-head { font: 600 10.5px var(--sans); letter-spacing: .12em; fill: var(--faint); }
+.fl-name { font: 500 12.5px var(--sans); fill: var(--text); }
+.fl-name.other { fill: var(--muted); font-style: italic; }
+.fl-count { font: 11px var(--mono); fill: var(--faint); }
+.fl-tag { font: 500 10px var(--sans); fill: #a78bfa; }
+.fl-empty { font: 13px var(--sans); fill: var(--muted); }
+.fl-link { fill-opacity: .2; transition: fill-opacity .15s; mix-blend-mode: screen; }
+.fl-bar { transition: opacity .15s; }
+.fl-bar.other { opacity: .55; }
+.fl-hit { fill: transparent; }
+.fl-node { cursor: pointer; outline: none; }
+.fl-node:focus-visible .fl-bar { stroke: var(--text); stroke-width: 2px; }
+.fl-node:hover .fl-name, .fl-node.on .fl-name { fill: #fff; }
+.flow svg.dim .fl-link { fill-opacity: .05; }
+.flow svg.dim .fl-link.on { fill-opacity: .62; }
+.flow svg.dim .fl-node:not(.on) { opacity: .35; }
+.pat-two { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); align-items: start; }
+.pat-table { max-height: 560px; }
+.pat-table td { white-space: nowrap; }
+.pat-table td:first-child { white-space: normal; min-width: 180px; }
+.pat-table .num { text-align: right; }
+.pat-table th.num { text-align: right; }
+.pk { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 8px; vertical-align: 1px; }
+.pk.payload { background: var(--block); } .pk.probe { background: var(--drop); }
+.pk-kind { color: var(--muted); font-size: 12px; }
+.pbar { display: inline-block; width: 64px; height: 6px; border-radius: 3px; background: var(--line); margin-right: 8px; vertical-align: middle; overflow: hidden; }
+.pbar i { display: block; height: 100%; border-radius: 3px; }
+.pbar i.payload { background: var(--block); } .pbar i.probe { background: var(--drop); }
+.ban-share { color: var(--ban); font-variant-numeric: tabular-nums; }
+.wave-list { display: grid; gap: 10px; }
+.wave-card { display: grid; gap: 6px; text-align: left; font: inherit; color: inherit; cursor: pointer; padding: 12px 14px; background: var(--card-2); }
+.wave-card:hover { border-color: var(--line-2); background: #181b21; }
+.wave-card b { font-weight: 600; line-height: 1.35; }
+.empty-big { display: grid; gap: 4px; place-items: center; padding: 48px 20px; text-align: center; }
+@media (max-width: 1100px) { .g5 { grid-template-columns: repeat(3, minmax(0, 1fr)); } .pat-two { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 640px) { .g5 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .pbar { display: none; } .pk-kind { display: none; } .pat-table th:nth-child(2) { display: none; } }
+.pop-list td.nowrap { white-space: nowrap; }
+.pop-list td.why { max-width: 260px; }

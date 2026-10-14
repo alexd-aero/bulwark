@@ -104,10 +104,16 @@ test("a wave: logged in full, banned, a campaign alert, the graph and the export
   const sum = s.points.reduce((a, p) => a + p.req, 0);
   assert.equal(sum, 15);
   assert.equal(s.points.reduce((a, p) => a + p.newIp, 0), 8);
-  const g = await get("/api/graph?span=1h");
-  assert.ok(g.nodes.some((n) => n.kind === "sig" && n.label === ".env files"));
-  assert.ok(g.nodes.some((n) => n.kind === "wave"));
-  assert.ok(g.edges.length >= 14);
+  // the Patterns page: networks -> patterns, counted in addresses, the campaign, who's behind each
+  const g = await get("/api/patterns?span=1h");
+  const env = g.sigs.find((x) => x.sig === "env-file"), vcs = g.sigs.find((x) => x.sig === "vcs");
+  assert.equal(env.ips, 7); assert.equal(vcs.ips, 7); assert.equal(env.name, ".env files");
+  assert.equal(g.flow.links.filter((l) => l.b === "sig:env-file").reduce((a, l) => a + l.ips, 0), 7, "every address on a ribbon, once per pattern");
+  assert.ok(g.waves.some((w) => w.members === 7 && w.sigs.length), "the campaign, with what it ran");
+  assert.equal(g.totals.ips >= 7, true);
+  const who = await get("/api/patterns/who?span=1h&id=sig:env-file");
+  assert.equal(who.ips.length, 7);
+  assert.ok(who.ips.every((x) => x.n === 1), "tries of that pattern, per address");
   // overview
   const o = await get("/api/overview?span=1h");
   assert.equal(o.totals.req, 15);
@@ -211,6 +217,8 @@ test("the host's past: Aegis's history comes in once, attackers in it are banned
   tell({ t: "history", host: "aegis-burrow", data });
   await until(() => app.brain.state.history.last.at !== at);
   assert.equal((await get("/api/logs?ip=198.51.100.40")).logs.length, 2, "not twice");
+  app.brain.logs.flush();                                     // on disk too now: still once (old times, but in memory)
+  assert.equal((await get("/api/logs?ip=198.51.100.40")).logs.length, 2, "not twice, after the day file has them");
   assert.equal((await get("/api/history")).last.rows, 0);
   // the setting turns the dashboard warnings off
   await fetch(base() + "/api/settings", { method: "PUT", headers: { "x-bulwark-key": "k", "Content-Type": "application/json" }, body: JSON.stringify({ hostNotices: false }) });

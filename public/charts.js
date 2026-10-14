@@ -150,161 +150,149 @@ export class Heatmap {
   }
 }
 
-// ------------------------------------------------------------------ the patterns graph
-// Addresses linked to the patterns they used, the networks they come from and
-// the waves they belong to. Positions are kept (here and in localStorage), so a
-// refresh only places what is new, next to what it is linked to: the picture stays.
-const COLORS = { ip: "#9aa3ae", ipBan: "#e040fb", sig3: "#ff5a52", sig1: "#f2b53c", as: "#46c2ff", asDc: "#a78bfa", wave: "#ff6a3d" };
-const hash = (s) => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0) / 4294967295; };
-export class Graph {
+// ------------------------------------------------------------------ the flow (Patterns)
+// Who tried what, as a flow: networks on the left, patterns on the right
+// (payloads, then probes, each a labeled group), and a ribbon for every
+// network → pattern pair, as thick as the addresses behind it. A fixed layout:
+// nothing moves, nothing overlaps, every node is labeled with its count.
+// Hover a node or a ribbon to trace it; click a node to see its addresses.
+// data: {nets: [{id, org, dc, ips, banned, other?}], sigs: [{id, name, score, ips, banned, other?}], links: [{a, b, ips, requests}]}
+const NS = "http://www.w3.org/2000/svg";
+const PAY = "#ff5a52", PROBE = "#f2b53c", NET = "#9aa3ae";
+const kindColor = (n) => (n.score === 3 ? PAY : PROBE);
+// "TECHTIES-AS - TechTies Inc." -> "TechTies Inc."; "GOOGLE-CLOUD-PLATFORM" stays
+export const netName = (org) => { const m = /^[A-Z0-9_.-]+ - (.+)$/.exec(String(org || "")); return (m ? m[1] : String(org || "")).trim() || "unknown network"; };
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+export class Flow {
   constructor(el, { onPick } = {}) {
     this.el = el; this.onPick = onPick;
-    this.canvas = document.createElement("canvas"); el.appendChild(this.canvas);
-    this.pos = new Map();
-    try { for (const [k, v] of JSON.parse(localStorage.getItem("bulwark-graph") || "[]")) this.pos.set(k, v); } catch { /* fresh */ }
-    this.view = { x: 0, y: 0, k: 1 }; this.hover = null; this.nodes = []; this.edges = [];
-    this.wire();
-    new ResizeObserver(() => this.draw()).observe(el);
+    el.classList.add("flow");
+    el.innerHTML = '<svg role="img"></svg><div class="tip"></div>';
+    this.svg = el.querySelector("svg"); this.tip = el.querySelector(".tip");
+    this.ro = new ResizeObserver(() => { if (this.data && Math.abs(this.el.clientWidth - (this.w || 0)) > 2) this.draw(); });
+    this.ro.observe(el);
+    this.svg.addEventListener("mousemove", (e) => this.hover(e));
+    this.svg.addEventListener("mouseleave", () => this.focus(null));
+    this.svg.addEventListener("click", (e) => { const n = e.target.closest("[data-node]"); if (n) this.onPick?.(this.byId.get(n.dataset.node)); });
+    this.svg.addEventListener("keydown", (e) => { const n = e.target.closest("[data-node]"); if (n && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); this.onPick?.(this.byId.get(n.dataset.node)); } });
+    this.svg.addEventListener("focusin", (e) => { const n = e.target.closest("[data-node]"); if (n) this.focus({ node: n.dataset.node }); });
   }
-  color(n) { return n.kind === "ip" ? (n.banned ? COLORS.ipBan : COLORS.ip) : n.kind === "sig" ? (n.score === 3 ? COLORS.sig3 : COLORS.sig1) : n.kind === "as" ? (n.dc ? COLORS.asDc : COLORS.as) : COLORS.wave; }
-  radius(n) { const base = n.kind === "ip" ? 3.5 : n.kind === "sig" ? 8 : n.kind === "wave" ? 10 : 6; return base + Math.min(n.kind === "ip" ? 6 : 16, Math.sqrt(n.w || 1) * (n.kind === "ip" ? 0.5 : 1.2)); }
-  set({ nodes, edges }) {
-    this.nodes = nodes; this.edges = edges;
-    const byId = new Map(nodes.map((n) => [n.id, n]));
-    // place new nodes: next to a placed neighbour, else on a ring by kind (deterministic)
-    const nb = new Map();
-    for (const e of edges) { (nb.get(e.a) || nb.set(e.a, []).get(e.a)).push(e.b); (nb.get(e.b) || nb.set(e.b, []).get(e.b)).push(e.a); }
-    const ring = { sig: 160, wave: 60, as: 330, ip: 250 };
-    for (const n of nodes) {
-      if (this.pos.has(n.id)) continue;
-      const near = (nb.get(n.id) || []).map((id) => this.pos.get(id)).find(Boolean);
-      const a = hash(n.id) * Math.PI * 2, r = ring[n.kind] || 200;
-      this.pos.set(n.id, near ? { x: near.x + Math.cos(a) * 40, y: near.y + Math.sin(a) * 40 } : { x: Math.cos(a) * r, y: Math.sin(a) * r });
-    }
-    // settle: a fixed number of steps from where things were (same input, same picture)
-    const P = (id) => this.pos.get(id);
-    for (let it = 0; it < 220; it++) {
-      const cool = 1 - it / 220;
-      const f = new Map(nodes.map((n) => [n.id, { x: 0, y: 0 }]));
-      for (let i = 0; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) {
-        const a = P(nodes[i].id), b = P(nodes[j].id);
-        let dx = a.x - b.x, dy = a.y - b.y, d2 = dx * dx + dy * dy + 0.01;
-        if (d2 > 90000) continue;
-        const rep = 900 / d2, fa = f.get(nodes[i].id), fb = f.get(nodes[j].id);
-        fa.x += dx * rep; fa.y += dy * rep; fb.x -= dx * rep; fb.y -= dy * rep;
-      }
-      for (const e of edges) {
-        const a = P(e.a), b = P(e.b);
-        if (!a || !b) continue;
-        const dx = b.x - a.x, dy = b.y - a.y, d = Math.sqrt(dx * dx + dy * dy) + 0.01;
-        const want = byId.get(e.a)?.kind === "ip" && byId.get(e.b)?.kind === "as" ? 55 : 80;
-        const k = (d - want) * 0.012 * Math.min(3, 1 + Math.log1p(e.w || 1) * 0.3);
-        const fa = f.get(e.a), fb = f.get(e.b);
-        if (fa) { fa.x += (dx / d) * k * d * 0.05; fa.y += (dy / d) * k * d * 0.05; }
-        if (fb) { fb.x -= (dx / d) * k * d * 0.05; fb.y -= (dy / d) * k * d * 0.05; }
-      }
-      for (const n of nodes) {
-        const p = P(n.id), v = f.get(n.id);
-        v.x -= p.x * 0.002; v.y -= p.y * 0.002;                       // a gentle pull to the middle
-        const m = Math.sqrt(v.x * v.x + v.y * v.y), cap = 8 * cool + 0.4;
-        if (m > cap) { v.x *= cap / m; v.y *= cap / m; }
-        p.x += v.x; p.y += v.y;
-      }
-    }
-    try { localStorage.setItem("bulwark-graph", JSON.stringify([...this.pos].filter(([k]) => byId.has(k)).slice(-1500))); } catch { /* full */ }
-    if (!this.fitted) this.fit();
-    this.draw();
-  }
-  fit() {
-    const xs = this.nodes.map((n) => this.pos.get(n.id)?.x || 0), ys = this.nodes.map((n) => this.pos.get(n.id)?.y || 0);
-    if (!xs.length) return;
-    const w = this.el.clientWidth, h = this.el.clientHeight;
-    const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
-    const k = Math.min(2.2, 0.86 * Math.min(w / Math.max(80, maxX - minX), h / Math.max(80, maxY - minY)));
-    this.view = { k, x: w / 2 - ((minX + maxX) / 2) * k, y: h / 2 - ((minY + maxY) / 2) * k };
-    this.fitted = true;
-  }
-  toScreen(p) { return { x: p.x * this.view.k + this.view.x, y: p.y * this.view.k + this.view.y }; }
-  at(sx, sy) {
-    let best = null, bd = 1e9;
-    for (const n of this.nodes) {
-      const s = this.toScreen(this.pos.get(n.id)), r = this.radius(n) * Math.max(0.6, this.view.k) + 4;
-      const d = (s.x - sx) ** 2 + (s.y - sy) ** 2;
-      if (d < r * r && d < bd) { bd = d; best = n; }
-    }
-    return best;
-  }
-  wire() {
-    let drag = null;
-    const c = this.canvas;
-    c.addEventListener("mousedown", (e) => { drag = { x: e.clientX, y: e.clientY, vx: this.view.x, vy: this.view.y, moved: false }; c.classList.add("drag"); });
-    window.addEventListener("mouseup", (e) => {
-      if (drag && !drag.moved) { const r = c.getBoundingClientRect(); const n = this.at(e.clientX - r.left, e.clientY - r.top); if (n) this.onPick?.(n); }
-      drag = null; c.classList.remove("drag");
-    });
-    c.addEventListener("mousemove", (e) => {
-      const r = c.getBoundingClientRect();
-      if (drag) {
-        const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
-        if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
-        this.view.x = drag.vx + dx; this.view.y = drag.vy + dy; this.draw(); return;
-      }
-      const n = this.at(e.clientX - r.left, e.clientY - r.top);
-      if (n !== this.hover) { this.hover = n; this.draw(); }
-    });
-    c.addEventListener("wheel", (e) => {
-      e.preventDefault();
-      const r = c.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
-      const k2 = Math.max(0.2, Math.min(6, this.view.k * (e.deltaY < 0 ? 1.12 : 1 / 1.12)));
-      this.view.x = mx - ((mx - this.view.x) * k2) / this.view.k; this.view.y = my - ((my - this.view.y) * k2) / this.view.k; this.view.k = k2;
-      this.draw();
-    }, { passive: false });
-  }
-  zoom(f) { const w = this.el.clientWidth / 2, h = this.el.clientHeight / 2, k2 = Math.max(0.2, Math.min(6, this.view.k * f)); this.view.x = w - ((w - this.view.x) * k2) / this.view.k; this.view.y = h - ((h - this.view.y) * k2) / this.view.k; this.view.k = k2; this.draw(); }
+  set(data) { this.data = data; this.draw(); }
+  destroy() { this.ro.disconnect(); }
   draw() {
-    const w = this.el.clientWidth, h = this.el.clientHeight;
-    if (!w || !h) return;
-    const d = DPR();
-    if (this.canvas.width !== Math.round(w * d) || this.canvas.height !== Math.round(h * d)) { this.canvas.width = Math.round(w * d); this.canvas.height = Math.round(h * d); }
-    const ctx = this.canvas.getContext("2d"); ctx.setTransform(d, 0, 0, d, 0, 0); ctx.clearRect(0, 0, w, h);
-    const hv = this.hover, linked = new Set();
-    if (hv) { linked.add(hv.id); for (const e of this.edges) { if (e.a === hv.id) linked.add(e.b); if (e.b === hv.id) linked.add(e.a); } }
-    for (const e of this.edges) {
-      const a = this.pos.get(e.a), b = this.pos.get(e.b);
-      if (!a || !b) continue;
-      const sa = this.toScreen(a), sb = this.toScreen(b), on = hv && linked.has(e.a) && linked.has(e.b);
-      ctx.strokeStyle = on ? "rgba(255,170,140,.75)" : hv ? "rgba(255,255,255,.03)" : `rgba(255,255,255,${Math.min(0.22, 0.05 + Math.log1p(e.w || 1) * 0.04)})`;
-      ctx.lineWidth = on ? 1.6 : 1;
-      ctx.beginPath(); ctx.moveTo(sa.x, sa.y); ctx.lineTo(sb.x, sb.y); ctx.stroke();
+    const d = this.data;
+    this.focused = null; this.svg.classList.remove("dim"); this.tip.style.opacity = 0;
+    const W = this.w = this.el.clientWidth, narrow = W < 640;
+    // only what has ribbons (an address banned without a pattern has no pattern to point at)
+    const used = new Set(d.links.flatMap((l) => [l.a, l.b]));
+    const nets = d.nets.filter((n) => used.has(n.id)), pays = d.sigs.filter((x) => used.has(x.id) && x.score === 3), probes = d.sigs.filter((x) => used.has(x.id) && x.score !== 3);
+    this.byId = new Map([...nets, ...pays, ...probes].map((n) => [n.id, n]));
+    const out = new Map(), inn = new Map();
+    for (const l of d.links) { out.set(l.a, (out.get(l.a) || 0) + l.ips); inn.set(l.b, (inn.get(l.b) || 0) + l.ips); }
+    if (!nets.length) { this.svg.setAttribute("viewBox", `0 0 ${W} 120`); this.svg.style.height = "120px"; this.svg.innerHTML = `<text x="${W / 2}" y="64" text-anchor="middle" class="fl-empty">No attacks in this window.</text>`; return; }
+    // geometry: a column of bars each side, labels outside them
+    const labW = narrow ? Math.min(132, W * 0.34) : Math.min(250, W * 0.27), barW = 10, top = 34, gap = narrow ? 14 : 12, groupGap = 44, minH = 4;
+    const xL = labW, xR = W - labW - barW;
+    const total = d.links.reduce((a, l) => a + l.ips, 0);
+    const rowsL = nets.length, rowsR = pays.length + probes.length;
+    const avail = Math.max(260, Math.min(560, Math.max(rowsL, rowsR) * 34));
+    const k = Math.max(0.5, (avail - Math.max(rowsL, rowsR) * gap) / Math.max(1, total));
+    const place = (list, size, y0, slot = 30) => {
+      let y = y0;
+      for (const n of list) { n._h = Math.max(minH, size(n) * k); n._y = y; y += Math.max(n._h, slot) + gap; }
+      return y;
+    };
+    let endL = place(nets, (n) => out.get(n.id) || 0, top);
+    let y = place(pays, (n) => inn.get(n.id) || 0, top);
+    const probeTop = pays.length ? y + groupGap - gap : top;
+    let endR = place(probes, (n) => inn.get(n.id) || 0, probeTop);
+    // the shorter column sits in the middle of the taller one
+    const shift = (list, dy) => { for (const n of list) n._y += dy; };
+    if (endL < endR) { const dy = (endR - endL) / 2; shift(nets, dy); endL += dy; }
+    else if (endR < endL) { const dy = (endL - endR) / 2; shift(pays, dy); shift(probes, dy); endR += dy; this._probeShift = dy; }
+    const H = Math.max(endL, endR) + 6;
+    for (const n of nets) n._x = xL;
+    for (const n of [...pays, ...probes]) n._x = xR;
+    // ribbons, stacked on each bar in the order of the other end (fewer crossings)
+    const links = d.links.filter((l) => this.byId.has(l.a) && this.byId.has(l.b)).map((l) => ({ ...l, A: this.byId.get(l.a), B: this.byId.get(l.b), t: l.ips * k }));
+    const offA = new Map(), offB = new Map();
+    for (const l of [...links].sort((p, q) => p.B._y - q.B._y)) { const o = offA.get(l.a) || 0; l.ya = l.A._y + o; offA.set(l.a, o + l.t); }
+    for (const l of [...links].sort((p, q) => p.A._y - q.A._y)) { const o = offB.get(l.b) || 0; l.yb = l.B._y + o; offB.set(l.b, o + l.t); }
+    // a node shorter than its ribbons (the 4px floor) stretches them: center them on it instead
+    for (const n of this.byId.values()) {
+      const sum = (n._x === xL ? out.get(n.id) : inn.get(n.id)) * k;
+      if (n._h > sum) { const pad = (n._h - sum) / 2; for (const l of links) { if (l.A === n) l.ya += pad; if (l.B === n) l.yb += pad; } }
     }
-    ctx.lineWidth = 1;
-    const labels = [];
-    for (const n of this.nodes) {
-      const s = this.toScreen(this.pos.get(n.id)), r = this.radius(n) * Math.max(0.6, Math.min(1.6, this.view.k));
-      const dim = hv && !linked.has(n.id);
-      ctx.globalAlpha = dim ? 0.18 : 1;
-      ctx.fillStyle = this.color(n);
-      if (n.kind === "sig" || n.kind === "wave") { ctx.shadowColor = this.color(n); ctx.shadowBlur = 14; }
-      ctx.beginPath();
-      if (n.kind === "as") { ctx.rect(s.x - r, s.y - r, r * 2, r * 2); } else if (n.kind === "wave") { ctx.moveTo(s.x, s.y - r * 1.2); ctx.lineTo(s.x + r * 1.1, s.y + r * 0.8); ctx.lineTo(s.x - r * 1.1, s.y + r * 0.8); ctx.closePath(); }
-      else ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
-      ctx.fill(); ctx.shadowBlur = 0;
-      if (n.kind === "ip" && n.banned) { ctx.strokeStyle = "rgba(224,64,251,.5)"; ctx.beginPath(); ctx.arc(s.x, s.y, r + 2.5, 0, Math.PI * 2); ctx.stroke(); }
-      if (!dim && (n.kind !== "ip" || this.view.k > 1.6 || n === hv)) labels.push([n, s, r]);
+    const x0 = xL + barW, x1 = xR, mx = (x0 + x1) / 2;
+    const ribbon = (l) => { const t = Math.max(1, l.t); return `M${x0},${l.ya}C${mx},${l.ya} ${mx},${l.yb} ${x1},${l.yb}L${x1},${l.yb + t}C${mx},${l.yb + t} ${mx},${l.ya + t} ${x0},${l.ya + t}Z`; };
+    this.links = links;
+    const fit = (s, px) => { const max = Math.floor(px / 6.6); return s.length > max ? s.slice(0, Math.max(4, max - 1)) + "…" : s; };
+    const label = (n, side) => {
+      const cy = n._y + Math.max(n._h, 14) / 2, name = n.org ? (n.other ? n.org : netName(n.org)) : n.name;
+      const count = `${fmtN(n.ips)}${narrow ? "" : n.ips === 1 ? " address" : " addresses"}${n.banned && !narrow ? ` · ${fmtN(n.banned)} banned` : ""}`;
+      const tx = side === "L" ? xL - 10 : xR + barW + 10, anchor = side === "L" ? "end" : "start";
+      const tag = n.dc && !narrow ? '<tspan class="fl-tag" dx="6">hosting</tspan>' : "";
+      return `<text x="${tx}" y="${cy - 2}" text-anchor="${anchor}" class="fl-name${n.other ? " other" : ""}" data-max="${labW - 16 - (tag ? 52 : 0)}" data-full="${esc(name)}">${esc(fit(name, labW - 16))}${tag}</text>
+        <text x="${tx}" y="${cy + 12}" text-anchor="${anchor}" class="fl-count">${count}</text>`;
+    };
+    const bar = (n, color) => `<g class="fl-node" data-node="${esc(n.id)}" tabindex="0" role="button" aria-label="${esc((n.org || n.name) + ": " + n.ips + " addresses")}">
+        <rect class="fl-hit" x="${n._x === xL ? 0 : xR - 6}" y="${n._y - 4}" width="${labW + barW + 6}" height="${Math.max(n._h, 26) + 8}"></rect>
+        <rect class="fl-bar${n.other ? " other" : ""}" x="${n._x}" y="${n._y}" width="${barW}" height="${n._h}" rx="3" fill="${color}"></rect>
+        ${label(n, n._x === xL ? "L" : "R")}</g>`;
+    const head = (x, yy, text, anchor) => `<text x="${x}" y="${yy}" text-anchor="${anchor}" class="fl-head">${text}</text>`;
+    this.svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    this.svg.style.height = H + "px";
+    this.svg.setAttribute("aria-label", `Who tried what: ${nets.length} networks, ${pays.length + probes.length} patterns`);
+    this.svg.innerHTML = `
+      ${head(xL + barW, 14, "NETWORKS", "end")}
+      ${pays.length ? head(xR, (pays[0]?._y ?? top) - 20, "PAYLOADS", "start") : ""}${probes.length ? head(xR, probes[0]._y - 14, "PROBES", "start") : ""}
+      <g class="fl-links">${links.map((l, i) => `<path d="${ribbon(l)}" fill="${kindColor(l.B)}" data-link="${i}" class="fl-link"></path>`).join("")}</g>
+      ${nets.map((n) => bar(n, NET)).join("")}
+      ${pays.map((n) => bar(n, PAY)).join("")}${probes.map((n) => bar(n, PROBE)).join("")}`;
+    // names cut to the room they have, measured (the estimate above is only a first guess)
+    for (const t of this.svg.querySelectorAll(".fl-name")) {
+      const max = Number(t.dataset.max), first = t.firstChild;
+      if (!first || first.nodeType !== 3 || !(max > 0)) continue;
+      let txt = t.dataset.full;
+      first.textContent = txt;
+      const width = () => (t.querySelector(".fl-tag") ? t.getComputedTextLength() - t.querySelector(".fl-tag").getComputedTextLength() : t.getComputedTextLength());
+      while (txt.length > 4 && width() > max) { txt = txt.slice(0, -1); first.textContent = txt.trimEnd() + "…"; }
     }
-    ctx.globalAlpha = 1;
-    ctx.font = "12px Inter, system-ui, sans-serif"; ctx.textBaseline = "middle";
-    for (const [n, s, r] of labels) {
-      const t = n.kind === "ip" ? n.label : n.label.length > 34 ? n.label.slice(0, 33) + "…" : n.label;
-      ctx.fillStyle = "rgba(8,9,11,.75)"; const tw = ctx.measureText(t).width;
-      ctx.fillRect(s.x + r + 4, s.y - 8, tw + 8, 16);
-      ctx.fillStyle = n.kind === "ip" ? "#cfd4da" : "#f1f3f5"; ctx.fillText(t, s.x + r + 8, s.y);
+  }
+  // light up one node (and everything it touches) or one ribbon; dim the rest
+  focus(f) {
+    const key = f ? (f.node || `l${f.link}`) : null;
+    if (key === this.focused) return;
+    this.focused = key;
+    this.svg.classList.toggle("dim", !!f);
+    const hot = new Set();
+    for (const [i, l] of (this.links || []).entries()) {
+      const on = f && (f.link === i || l.a === f.node || l.b === f.node);
+      this.svg.querySelector(`[data-link="${i}"]`)?.classList.toggle("on", !!on);
+      if (on) { hot.add(l.a); hot.add(l.b); }
     }
-    if (hv) {
-      const t = hv.kind === "ip" ? `${hv.label}${hv.org ? " · " + hv.org : ""}${hv.cc ? " · " + hv.cc : ""} · ${hv.n} requests${hv.banned ? " · banned" : ""}` : `${hv.label}`;
-      ctx.font = "12px ui-monospace, Menlo, monospace"; const tw = ctx.measureText(t).width;
-      ctx.fillStyle = "rgba(13,15,18,.95)"; ctx.fillRect(12, 12, tw + 20, 26); ctx.strokeStyle = "#2a2f37"; ctx.strokeRect(12.5, 12.5, tw + 19, 25);
-      ctx.fillStyle = "#e9ebee"; ctx.fillText(t, 22, 25);
-    }
+    for (const g of this.svg.querySelectorAll("[data-node]")) g.classList.toggle("on", hot.has(g.dataset.node) || g.dataset.node === f?.node);
+    if (!f) this.tip.style.opacity = 0;
+  }
+  hover(e) {
+    const r = this.el.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+    const nodeEl = e.target.closest("[data-node]"), linkEl = e.target.closest("[data-link]");
+    let html = null;
+    if (nodeEl) {
+      const n = this.byId.get(nodeEl.dataset.node);
+      this.focus({ node: n.id });
+      const kind = n.score === undefined ? (n.other ? "networks" : n.dc ? "hosting network" : "network") : n.score === 3 ? "payload pattern" : "probe pattern";
+      html = `<b>${esc(n.org || n.name)}</b><span>${kind}${n.asn ? ` · AS${n.asn}` : ""}</span><span>${fmtN(n.ips)} addresses · ${fmtN(n.banned || 0)} banned · ${fmtN(n.requests)} requests</span><em>Click for the addresses</em>`;
+    } else if (linkEl) {
+      const l = this.links[Number(linkEl.dataset.link)];
+      this.focus({ link: Number(linkEl.dataset.link) });
+      html = `<b>${esc(l.A.other ? l.A.org : netName(l.A.org))} → ${esc(l.B.name)}</b><span>${fmtN(l.ips)} address${l.ips === 1 ? "" : "es"} · ${fmtN(l.requests)} request${l.requests === 1 ? "" : "s"}</span>`;
+    } else this.focus(null);
+    if (!html) return;
+    this.tip.innerHTML = html;
+    this.tip.style.opacity = 1;
+    const tw = this.tip.offsetWidth, th = this.tip.offsetHeight;
+    this.tip.style.left = Math.max(4, Math.min(r.width - tw - 4, x + 14)) + "px";
+    this.tip.style.top = Math.max(4, y - th - 10) + "px";
   }
 }

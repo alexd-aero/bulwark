@@ -1,7 +1,7 @@
 // Bulwark's dashboard. Plain modules, no build step, no inline handlers (strict CSP):
 // everything is wired through data-act attributes and one delegated listener.
 // All paths are relative, so it works at / and under a host's mount (/__gate/bulwark/).
-import { TimeChart, Heatmap, Graph, fmtN } from "./charts.js";
+import { TimeChart, Heatmap, Flow, fmtN, netName } from "./charts.js";
 
 const $ = (s, el = document) => el.querySelector(s);
 const app = $("#app");
@@ -203,39 +203,70 @@ function renderWaves() {
 }
 
 // ------------------------------------------------------------------ patterns graph
+// Who tried what: the totals, a flow from networks to patterns, every pattern
+// ranked, and the campaigns. Click anything for the addresses behind it.
+const kindOf = (x) => (x.score === 3 ? "payload" : "probe");
 async function renderPatterns() {
   app.innerHTML = `
-    <div class="head"><div><h1>Patterns</h1><p>Every stranger that attacked, linked to what it tried, the network it came from and the waves it joined. Drag to move, scroll to zoom, hover to trace, click to open. The layout is kept between visits.</p></div>
+    <div class="head"><div><h1>Patterns</h1><p>Every stranger that attacked: the networks they came from, what they tried, and the campaigns they joined. Hover to trace, click for the addresses.</p></div>
       <div class="spacer"></div>${seg("gspan", S.gspan, ["1h", "6h", "24h", "7d", "30d"])}</div>
-    <div class="graphwrap" id="gw"><div class="graph-hud"><button class="btn sm" data-act="gzoom" data-v="1.25">+</button><button class="btn sm" data-act="gzoom" data-v="0.8">−</button><button class="btn sm" data-act="gfit">Fit</button></div>
-      <div class="graph-legend"><span><i style="background:#9aa3ae"></i>address</span><span><i style="background:#e040fb"></i>banned</span><span><i style="background:#ff5a52"></i>payload pattern</span><span><i style="background:#f2b53c"></i>probe pattern</span><span><i style="background:#46c2ff;border-radius:2px"></i>network</span><span><i style="background:#a78bfa;border-radius:2px"></i>hosting network</span><span><i style="background:#ff6a3d"></i>campaign</span></div></div>`;
-  charts.graph = new Graph($("#gw"), { onPick: (n) => { if (n.kind === "ip") openIp(n.label); else openPop(n); } });
-  S.gdata = await api(`graph?span=${S.gspan}`);
-  charts.graph.set(S.gdata);
+    <div id="patBody"><p class="muted"><span class="spin"></span> Loading…</p></div>`;
+  const d = S.pat = await api(`patterns?span=${S.gspan}`);
+  const T = d.totals, pct = (a, b) => (b ? Math.round((100 * a) / b) : 0);
+  const maxReq = Math.max(1, ...d.sigs.map((x) => x.requests)), maxIps = Math.max(1, ...d.sigs.map((x) => x.ips));
+  const sigRow = (x) => `<tr class="click" data-act="patpick" data-id="${h(x.id)}">
+      <td title="${h(x.sig)}"><span class="pk ${kindOf(x)}" aria-hidden="true"></span><b>${h(x.name)}</b></td>
+      <td class="pk-kind">${kindOf(x) === "payload" ? "payload" : "probe"}</td>
+      <td class="num"><span class="pbar"><i class="${kindOf(x)}" style="width:${(100 * x.ips) / maxIps}%"></i></span>${fmtN(x.ips)}</td>
+      <td class="num mono">${fmtN(x.requests)}</td>
+      <td class="num">${x.banned ? `<span class="ban-share" title="${x.banned} of ${x.ips} banned">${pct(x.banned, x.ips)}%</span>` : '<span class="faint">–</span>'}</td>
+      <td class="faint small">${ago(x.last)}</td></tr>`;
+  const waveCard = (w) => `<button class="card wave-card" data-act="patpick" data-id="${h(w.id)}">
+      <div class="row"><span class="pill ${SEVP[w.sev] || ""}">${h(w.sev)}</span>${w.open ? '<span class="pill">ongoing</span>' : ""}<span class="spacer"></span><span class="faint small">${ago(w.last)}</span></div>
+      <b>${h(w.title)}</b>
+      <span class="muted small">${fmtN(w.members)} addresses · ${fmtN(w.banned)} banned${w.sigs.length ? ` · ${w.sigs.map(h).join(", ")}` : ""}</span></button>`;
+  $("#patBody").innerHTML = !T.ips ? '<div class="card empty-big"><b>Nothing attacked in this window.</b><span class="muted">Pick a longer one above.</span></div>' : `
+    <div class="grid g5 pat-stats">
+      <div class="card stat"><b>${fmtN(T.ips)}</b><span>attacking addresses</span><div class="sub">${fmtN(T.requests)} attack requests</div></div>
+      <div class="card stat ${T.banned ? "hot" : ""}"><b>${fmtN(T.banned)}</b><span>banned</span><div class="sub">${pct(T.banned, T.ips)}% of them</div></div>
+      <div class="card stat"><b>${fmtN(T.sigs)}</b><span>patterns</span><div class="sub">${fmtN(d.sigs.filter((x) => x.score === 3).length)} payloads · ${fmtN(d.sigs.filter((x) => x.score !== 3).length)} probes</div></div>
+      <div class="card stat"><b>${fmtN(T.nets)}</b><span>networks</span><div class="sub">${fmtN(d.flow.nets.filter((n) => n.dc).length)} of the top ones are hosting</div></div>
+      <div class="card stat ${T.campaigns ? "warm" : ""}"><b>${fmtN(T.campaigns)}</b><span>campaigns</span><div class="sub">many addresses, one playbook</div></div>
+    </div>
+    <section class="card flow-card">
+      <div class="row flow-head"><div><h3>Who tried what</h3><p class="muted small">Ribbon width: how many addresses from that network tried that pattern. The busiest are named; the rest are folded into "other".</p></div>
+        <span class="spacer"></span><div class="flow-legend"><span><i style="background:#9aa3ae"></i>network</span><span><i style="background:#ff5a52"></i>payload: after secrets or a way in</span><span><i style="background:#f2b53c"></i>probe: looking for software</span></div></div>
+      <div id="flow"></div></section>
+    <div class="grid pat-two">
+      <section class="card"><h3>Every pattern <span class="faint">${d.sigs.length}</span></h3>
+        <div class="scroll pat-table"><table><thead><tr><th>Pattern</th><th>Kind</th><th class="num">Addresses</th><th class="num">Requests</th><th class="num">Banned</th><th>Last</th></tr></thead>
+          <tbody>${d.sigs.map(sigRow).join("")}</tbody></table></div></section>
+      <section class="card"><h3>Campaigns <span class="faint">${d.waves.length}</span></h3>
+        ${d.waves.length ? `<div class="wave-list">${d.waves.map(waveCard).join("")}</div>` : '<p class="muted small">None in this window. A campaign is many addresses running the same playbook at once (Waves has the details).</p>'}</section>
+    </div>`;
+  if (T.ips) { charts.flow = new Flow($("#flow"), { onPick: (n) => openPop(n.id, n.org || n.name) }); charts.flow.set(d.flow); }
 }
-// A pattern, a network or a campaign, clicked: who's behind it, right here.
-function openPop(n) {
-  const g = S.gdata || { nodes: [], edges: [] }, byId = new Map(g.nodes.map((x) => [x.id, x]));
-  const w = new Map();
-  for (const e of g.edges) {
-    const other = e.a === n.id ? e.b : e.b === n.id ? e.a : null;
-    if (other?.startsWith("ip:")) w.set(other, (w.get(other) || 0) + (e.w || 1));
-  }
-  const ips = [...w].map(([id, k]) => ({ ...byId.get(id), k })).filter((x) => x.label).sort((a, b) => b.k - a.k || b.n - a.n);
-  const banned = ips.filter((x) => x.banned).length;
-  const kind = { sig: n.score === 3 ? "payload pattern" : "probe pattern", as: n.dc ? "hosting network" : "network", wave: "campaign" }[n.kind] || n.kind;
-  const logBtn = n.kind === "sig" ? `<button class="btn sm ghost" data-act="poplog" data-k="sig" data-v="${h(n.id.slice(4))}">Show its requests in the live log</button>` : "";
+// A network, a pattern or a campaign, clicked: the addresses behind it, right here.
+async function openPop(id, label) {
   const pop = $("#pop");
-  pop.innerHTML = `<div class="pop-card" role="dialog" aria-modal="true" aria-label="${h(n.label)}">
-      <div class="row"><div><div class="faint small">${h(kind)} · ${S.gspan}</div><h2>${h(n.label)}</h2></div><span class="spacer"></span><button class="btn sm ghost" data-act="popclose" aria-label="Close">✕</button></div>
-      <p class="muted small">${fmtN(ips.length)} address${ips.length === 1 ? "" : "es"}${banned ? ` · <b class="st4">${fmtN(banned)} banned</b>` : ""}${n.kind === "sig" ? ` · ${fmtN(n.w)} request${n.w === 1 ? "" : "s"}` : ""}. Click one for everything about it.</p>
-      <div class="scroll pop-list"><table><thead><tr><th>Address</th><th>Network</th><th>${n.kind === "sig" ? "Tries" : "Requests"}</th><th></th></tr></thead><tbody>
-        ${ips.map((x) => `<tr class="click" data-act="popip" data-ip="${h(x.label)}"><td>${ipBtn(x.label, x.cc)}</td><td class="why">${h(x.org || "–")}${x.dc ? ' <span class="pill dc">hosting</span>' : ""}</td>
-          <td class="mono">${fmtN(n.kind === "sig" ? x.k : x.n)}</td><td>${x.banned ? '<span class="pill ban">banned</span>' : ""}</td></tr>`).join("") || '<tr><td colspan="4" class="empty">Nobody in this window.</td></tr>'}
-      </tbody></table></div>
-      <div class="row end">${logBtn}<button class="btn sm" data-act="popclose">Close</button></div></div>`;
+  const any = [...(S.pat?.sigs || []), ...(S.pat?.flow.nets || []), ...(S.pat?.flow.sigs || []), ...(S.pat?.waves || [])].find((x) => x.id === id) || {};
+  const kind = id.startsWith("wave:") ? "campaign" : id.startsWith("as:") ? (id === "as:other" ? "networks" : any.dc ? "hosting network" : "network") : any.score === 3 ? "payload pattern" : "probe pattern";
+  const title = label || any.title || any.org || any.name || id;
+  pop.innerHTML = `<div class="pop-card" role="dialog" aria-modal="true" aria-label="${h(title)}"><div class="row"><div><div class="faint small">${h(kind)} · ${S.gspan}</div><h2>${h(title)}</h2></div><span class="spacer"></span><button class="btn sm ghost" data-act="popclose" aria-label="Close">✕</button></div><p class="muted"><span class="spin"></span> Finding them…</p></div>`;
   pop.hidden = false;
   requestAnimationFrame(() => pop.classList.add("open"));
+  let ips = [];
+  try { ips = (await api(`patterns/who?span=${S.gspan}&id=${encodeURIComponent(id)}`)).ips; } catch (e) { toast(e.message); }
+  const banned = ips.filter((x) => x.banned).length, sigOnly = id.startsWith("sig:") && !id.startsWith("sig:other");
+  const logBtn = sigOnly ? `<button class="btn sm ghost" data-act="poplog" data-k="sig" data-v="${h(id.slice(4))}">Show its requests in the live log</button>` : "";
+  pop.innerHTML = `<div class="pop-card" role="dialog" aria-modal="true" aria-label="${h(title)}">
+      <div class="row"><div><div class="faint small">${h(kind)} · ${S.gspan}</div><h2>${h(title)}</h2></div><span class="spacer"></span><button class="btn sm ghost" data-act="popclose" aria-label="Close">✕</button></div>
+      <p class="muted small">${fmtN(ips.length)} address${ips.length === 1 ? "" : "es"}${banned ? ` · <b class="st4">${fmtN(banned)} banned</b>` : ""}. Click one for everything about it.</p>
+      <div class="scroll pop-list"><table><thead><tr><th>Address</th><th>Network</th><th>${sigOnly ? "Tries" : "Requests"}</th><th></th></tr></thead><tbody>
+        ${ips.map((x) => `<tr class="click" data-act="popip" data-ip="${h(x.ip)}"><td class="nowrap">${ipBtn(x.ip, x.cc)}</td><td class="why" title="${h(x.org || "")}">${h(x.org ? netName(x.org) : "–")}${x.dc ? ' <span class="pill dc">hosting</span>' : ""}</td>
+          <td class="mono">${fmtN(x.n)}</td><td>${x.banned ? '<span class="pill ban">banned</span>' : ""}</td></tr>`).join("") || '<tr><td colspan="4" class="empty">Nobody in this window.</td></tr>'}
+      </tbody></table></div>
+      <div class="row end">${logBtn}<button class="btn sm" data-act="popclose">Close</button></div></div>`;
 }
 function closePop() { const p = $("#pop"); if (!p || p.hidden) return; p.classList.remove("open"); p.hidden = true; }
 
@@ -436,7 +467,7 @@ async function show(view) {
   S.view = VIEWS[view] ? view : "overview";
   for (const a of document.querySelectorAll("#nav a")) a.classList.toggle("on", a.dataset.v === S.view);
   const [load, render] = VIEWS[S.view];
-  charts = {};
+  charts.flow?.destroy?.(); charts = {};
   try { if (load) { if (S.view !== "overview" || !S.ov) app.innerHTML = '<p class="muted"><span class="spin"></span> Loading…</p>'; await load(); } await render(); }
   catch (e) { app.innerHTML = `<div class="card"><b class="st5">Couldn't load this.</b> <span class="muted">${h(e.message)}</span></div>`; }
 }
@@ -495,8 +526,7 @@ document.addEventListener("click", async (e) => {
   try {
     if (act === "span") { S.span = el.dataset.v; localStore("span", S.span); await loadOverview(); renderOverview(); }
     else if (act === "gspan") { S.gspan = el.dataset.v; renderPatterns(); }
-    else if (act === "gzoom") charts.graph?.zoom(Number(el.dataset.v));
-    else if (act === "gfit") { charts.graph?.fit(); charts.graph?.draw(); }
+    else if (act === "patpick") openPop(el.dataset.id);
     else if (act === "ip") { e.stopPropagation(); openIp(ip); }
     else if (act === "closedrawer") closeDrawer();
     else if (act === "devname") {
