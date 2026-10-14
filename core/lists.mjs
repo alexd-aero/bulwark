@@ -289,7 +289,7 @@ export class Feeds {
   }
   lookup(ip) { return lookupIn(this.lists, ip); }
   view() {
-    return FEEDS.map((f) => ({ id: f.id, name: f.name, vendor: f.vendor, about: f.about, strength: f.strength, url: f.url, every: f.every,
+    return FEEDS.map((f) => ({ id: f.id, name: f.name, vendor: f.vendor, about: f.about, strength: f.strength, url: f.url, every: f.every, poll: f.poll,
                                ...(this.meta[f.id] || {}), loadedNow: this.lists.has(f.id) }));
   }
   total() { let n = 0; for (const f of FEEDS) if (this.lists.has(f.id)) n += this.meta[f.id]?.count || 0; return n; }

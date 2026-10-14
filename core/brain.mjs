@@ -342,8 +342,9 @@ export class Brain {
   bansList() {
     const now = Date.now();
     return Object.entries(this.state.bans).filter(([, b]) => !b.until || b.until > now).map(([ip, b]) => {
-      const p = this.profiles.get(ip);
-      return { ip, ...b, org: p?.org || "", asn: p?.asn || null, dc: !!p?.dc, n: p?.n || 0, reported: this.reporters.state.reported[ip] || null };
+      const p = this.profiles.get(ip), a = p?.asn ? null : this.asn.lookup(ip);
+      return { ip, ...b, org: p?.org || a?.name || "", asn: p?.asn || a?.asn || null, dc: p ? !!p.dc : !!a?.hosting, country: b.country || p?.cc || a?.cc || "",
+               n: p?.n || 0, reported: this.reporters.state.reported[ip] || null };
     }).sort((a, b) => (b.last || b.at) - (a.last || a.at));
   }
 }

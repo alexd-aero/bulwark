@@ -81,7 +81,7 @@ select.input { padding-right: 26px; }
 table { width: 100%; border-collapse: collapse; }
 th { text-align: left; font: 500 11px var(--sans); text-transform: uppercase; letter-spacing: .05em; color: var(--faint); padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; position: sticky; top: 0; background: var(--card); z-index: 1; }
 td { padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
-td.faint.mono, td.mono { white-space: nowrap; }
+td.faint, td.mono { white-space: nowrap; }
 tr.click { cursor: pointer; } tr.click:hover td { background: rgba(255,255,255,.02); }
 td.path { max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 td.why { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
