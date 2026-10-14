@@ -4,6 +4,9 @@
 //   score 1: a probe: asking for software that isn't here (a mark, not dropped)
 
 const S = (id, name, score, ...res) => ({ id, name, score, res });
+// Raised whenever the signatures learn something: the app then reads its log
+// again with them (Brain.rescan), so what slipped past before is caught now.
+export const SIGNATURES_VERSION = 2;
 export const SIGNATURES = [
   S("env-file", ".env files", 3, /(^|\/)\.env(\.[\w.-]*)?$/i),
   S("vcs", "Git / SVN metadata", 3, /(^|\/)\.(git|svn|hg|bzr)(\/|$)/i, /(^|\/)\.git-credentials$/i),

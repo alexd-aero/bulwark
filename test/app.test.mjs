@@ -194,3 +194,17 @@ test("access \"host\": only the host's header opens it, never a link or a cookie
     assert.equal((await fetch(b2 + "/api/settings", { headers: { "x-bulwark-key": "k2" } })).status, 200, "the host's header does");
   } finally { a2.close(); }
 });
+
+test("newer patterns, older lines: the log is read again and what slipped through is caught", async () => {
+  const t0 = Date.now();
+  // a phishing-kit hunter that came before the patterns knew it: let through then
+  tell({ t: "ev", list: ["/js/raif_ch.js", "/js/twint_ch.js", "/bot-connect.js"].map((p, i) => ({ t: t0 + i, ip: "198.51.100.77", cc: "RO", host: "8790.tunnel.example", m: "GET", path: p, ua: "Mozilla/5.0", dec: "pass", st: 302, b: 0 })) });
+  await sleep(150);
+  assert.equal(app.brain.state.bans["198.51.100.77"], undefined);
+  app.brain.state.sigVersion = 1;
+  const r = app.brain.rescan();
+  assert.ok(r.marked >= 3);
+  assert.ok(r.banned.includes("198.51.100.77"));
+  assert.match(app.brain.state.bans["198.51.100.77"].reason, /newer patterns.*3 payloads/);
+  assert.equal(app.brain.rescan().banned.length, 0, "once is enough");
+});

@@ -29,7 +29,7 @@ import { Asn } from "./asn.mjs";
 import { Logs, Series, Profiles } from "./store.mjs";
 import { Waves } from "./waves.mjs";
 import { Reporters } from "./report.mjs";
-import { classifyRequest } from "./payloads.mjs";
+import { classifyRequest, SIGNATURES_VERSION } from "./payloads.mjs";
 import { checkIp, useLists } from "./intel.mjs";
 import { paths } from "./config.mjs";
 
@@ -92,6 +92,7 @@ export class Brain {
       t(() => this.asn.refreshDue().catch(() => {}), 6 * HOUR);
       t(() => this.refreshOwn(), HOUR);
     } else this.asn.load().catch(() => {});
+    if ((this.state.sigVersion || 1) < SIGNATURES_VERSION) once(() => this.rescan(), 15000);
     t(() => this.save(), 30e3);
     t(() => this.tick(), 30e3);
     t(() => { this.profiles.save(); this.series.save(); this.waves.save(); this.reporters.save(); }, 2 * MIN);
@@ -212,6 +213,35 @@ export class Brain {
       title: `Bulwark found ${banned.length} attacker${banned.length > 1 ? "s" : ""} in Aegis's history`,
       body: banned.slice(0, 6).map((ip) => `${ip}: ${this.state.bans[ip]?.reason || ""}`).join("\n") });
     return H.last;
+  }
+
+  // ------------------------------------------------------------ newer patterns, older lines
+  // The log read again with the current signatures: lines that slipped through
+  // get their pattern, and whoever they convict is banned by the guard's rules.
+  rescan() {
+    const per = new Map();
+    let marked = 0;
+    for (const e of this.logs.ring) {
+      if (e.sig || e.dec !== "pass" && e.dec !== "seen" || e.auth || e.local || e.own) continue;
+      const sig = classifyRequest(e.path, e.ua);
+      if (!sig.score) continue;
+      e.sig = sig.id; e.sc = sig.score; marked++;
+      const p = this.profiles.get(e.ip); if (p) p.sigs[sig.id] = (p.sigs[sig.id] || 0) + 1;
+      if (sig.ua) continue;
+      const x = per.get(e.ip) || { score: 0, payloads: 0, paths: [], host: e.host, cc: e.cc };
+      x.score += sig.score; if (sig.score === 3) x.payloads++; if (x.paths.length < 3 && !x.paths.includes(e.path)) x.paths.push(String(e.path).slice(0, 80));
+      per.set(e.ip, x);
+    }
+    const banned = [];
+    for (const [ip, x] of per) {
+      if (this.state.bans[ip] || this.state.allow[ip] || this.isTrusted(ip) || this.own.has(ip) || isPrivate(ip)) continue;
+      if (x.payloads >= 2 || (!this.verdicts.get(ip)?.benign && x.score >= 6)) {
+        if (this.ban(ip, `newer patterns, older requests: ${x.payloads >= 2 ? `${x.payloads} payloads` : "probing"} (${x.paths.join(", ")})`, { source: "payload", ttl: 30 * DAY, info: { host: x.host, country: x.cc } })) banned.push(ip);
+      }
+    }
+    this.state.sigVersion = SIGNATURES_VERSION; this.dirty = true;
+    this.log(`patterns v${SIGNATURES_VERSION}: read the log again: ${marked} lines got a pattern${banned.length ? `, banned ${banned.join(", ")}` : ""}`);
+    return { marked, banned };
   }
 
   // ------------------------------------------------------------ warnings on the host's dashboard
