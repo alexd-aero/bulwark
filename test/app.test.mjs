@@ -1,0 +1,147 @@
+// The app end to end: a guard connects over the socket, reports a wave like the
+// one of 2026-10-14 (seven cloud machines, each /.env then /.git/config), and the
+// app logs it, bans, warns, draws it, exports it. No network: lookups are faked.
+import { test, after } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { connect } from "node:net";
+
+process.env.BULWARK_CONFIG = join(mkdtempSync(join(tmpdir(), "bw-cfg-")), "bulwark.json");
+const { startApp } = await import("../server.mjs");
+
+const home = mkdtempSync(join(tmpdir(), "bw-home-"));
+// Aegis 2.14's built-in shield, to be imported
+const legacy = mkdtempSync(join(tmpdir(), "bw-legacy-"));
+mkdirSync(join(legacy, "feeds"));
+writeFileSync(join(legacy, "state.json"), JSON.stringify({ bans: { "35.236.186.124": { at: Date.now(), until: null, reason: "129+ .env grabs", source: "manual", hits: 3 } },
+                                                          allow: {}, trusted: { "93.184.216.34": Date.now() }, events: [{ t: Date.now() - 1000, ip: "35.236.186.124", act: "banned", why: "x" }] }));
+writeFileSync(join(legacy, "feeds", "cins.txt"), "45.148.10.120\n");
+
+const verdicts = { "203.0.113.66": { verdict: { level: "malicious", why: ["GreyNoise: malicious"] }, sources: { greynoise: { result: { classification: "malicious", seen: true } } } } };
+const app = startApp({ home, port: 0, key: "k", offline: true, quiet: true,
+  remote: async (ip) => verdicts[ip] || { verdict: { level: "clean", why: [] }, sources: {} } });
+after(() => { sock?.destroy(); app.close(); });
+const base = () => `http://127.0.0.1:${app.server.address().port}`;
+const get = (p) => fetch(base() + p, { headers: { "x-bulwark-key": "k" } }).then((r) => r.json());
+const post = (p, b = {}) => fetch(base() + p, { method: "POST", headers: { "x-bulwark-key": "k", "Content-Type": "application/json" }, body: JSON.stringify(b) }).then((r) => r.json());
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+await new Promise((r) => app.server.once("listening", r).listening ? r() : null);
+await sleep(100);
+
+// a fake guard
+const got = [];
+var sock = connect(app.brain.P.socket);
+let buf = "";
+sock.on("data", (d) => { buf += d; let i; while ((i = buf.indexOf("\n")) >= 0) { got.push(JSON.parse(buf.slice(0, i))); buf = buf.slice(i + 1); } });
+await new Promise((r) => sock.once("connect", r));
+const tell = (m) => sock.write(JSON.stringify(m) + "\n");
+tell({ t: "hello", host: "aegis-burrow", legacy });
+await sleep(150);
+
+test("a key is needed; the status isn't secret", async () => {
+  assert.equal((await fetch(base() + "/api/overview")).status, 401);
+  assert.equal((await fetch(base() + "/api/status").then((r) => r.json())).ok, true);
+  const r = await fetch(base() + "/?k=k", { redirect: "manual" });
+  assert.equal(r.status, 302);
+  assert.match(r.headers.get("set-cookie"), /bulwark_k=k/);
+});
+
+test("the guard gets the state on hello; Aegis's old shield is imported", async () => {
+  const st = got.find((m) => m.t === "state");
+  assert.ok(st, "state sent");
+  await sleep(50);
+  assert.ok(app.brain.state.bans["35.236.186.124"], "the old ban came over");
+  assert.ok(app.brain.isTrusted("93.184.216.34"));
+  assert.ok(app.brain.feeds.lists.has("cins"), "and its lists");
+  assert.ok(got.filter((m) => m.t === "state").length >= 2, "the guard got the merged state");
+});
+
+test("a wave: logged in full, banned, a campaign alert, the graph and the export", async () => {
+  const t0 = Date.now();
+  const cloud = ["136.85.34.52", "104.199.226.84", "104.196.170.201", "136.85.201.228", "136.85.182.102", "136.83.11.229", "34.134.246.137"];
+  const list = [];
+  for (const [i, ip] of cloud.entries()) {
+    list.push({ t: t0 + i * 10, ip, cc: "US", host: "27715.tunnel.example", m: "GET", path: "/.env", ua: "Go-http-client/1.1", dec: "drop", sig: "env-file", sc: 3, st: 404, b: 9 });
+    list.push({ t: t0 + i * 10 + 5, ip, cc: "US", host: "27715.tunnel.example", m: "GET", path: "/.git/config", ua: "Go-http-client/1.1", dec: "ban", sig: "vcs", sc: 3, st: 403, b: 8, why: "sent 2 payloads" });
+  }
+  list.push({ t: t0 + 100, ip: "203.0.113.66", cc: "NL", host: "27715.tunnel.example", m: "GET", path: "/", ua: "Mozilla/5.0", dec: "pass", st: 200, b: 1900 });
+  tell({ t: "ev", list });
+  for (const ip of cloud) tell({ t: "ban", ip, b: { reason: "sent 2 payloads (/.git/config, /.env)", until: null, source: "payload", at: Date.now() }, info: { host: "27715.tunnel.example", country: "US" } });
+  await sleep(300);
+  // logs
+  const logs = (await get("/api/logs?ip=136.85.34.52")).logs;
+  assert.equal(logs.length, 2);
+  assert.equal(logs[0].path, "/.git/config", "newest first");
+  assert.equal((await get("/api/logs?dec=bad&limit=100")).logs.length, 14);
+  assert.equal((await get("/api/logs?q=git%2Fconfig")).logs.length, 7);
+  // bans: the guard's, and the lookup's (GreyNoise malicious)
+  const bl = (await get("/api/blocklist")).bans.map((b) => b.ip);
+  for (const ip of cloud) assert.ok(bl.includes(ip), ip);
+  assert.ok(bl.includes("203.0.113.66"), "banned by its lookup");
+  assert.ok(got.some((m) => m.t === "ban" && m.ip === "203.0.113.66"), "and the guard was told");
+  assert.ok(got.some((m) => m.t === "kick" && m.ip === "203.0.113.66"));
+  const ban = app.brain.state.bans["136.85.34.52"];
+  assert.deepEqual(ban.lines, ["GET /.env", "GET /.git/config"], "evidence kept for reports");
+  // the wave
+  const alerts = (await get("/api/alerts")).alerts;
+  const camp = alerts.find((a) => a.kind === "campaign");
+  assert.ok(camp, "a campaign alert");
+  assert.equal(camp.sev, "critical", "seven machines: critical");
+  assert.equal(camp.members.length, 7);
+  assert.match(camp.detail, /\.env files → Git/);
+  assert.ok(alerts.some((a) => a.kind === "network"), "and a network cluster (136.85.x)");
+  // strict mode follows a critical wave
+  app.brain.tick();
+  assert.ok(app.brain.strictUntil > Date.now());
+  await sleep(50);
+  assert.ok(got.some((m) => m.t === "strict" && m.until > Date.now()));
+  // charts and graph
+  const s = await get("/api/series?span=1h&points=60");
+  const sum = s.points.reduce((a, p) => a + p.req, 0);
+  assert.equal(sum, 15);
+  assert.equal(s.points.reduce((a, p) => a + p.newIp, 0), 8);
+  const g = await get("/api/graph?span=1h");
+  assert.ok(g.nodes.some((n) => n.kind === "sig" && n.label === ".env files"));
+  assert.ok(g.nodes.some((n) => n.kind === "wave"));
+  assert.ok(g.edges.length >= 14);
+  // overview
+  const o = await get("/api/overview?span=1h");
+  assert.equal(o.totals.req, 15);
+  assert.ok(o.alerts.length >= 2);
+  assert.equal(o.tops.sigs[0].n, 7);
+  // export
+  const txt = await fetch(base() + "/api/blocklist.txt?format=nginx", { headers: { "x-bulwark-key": "k" } }).then((r) => r.text());
+  assert.match(txt, /deny 136\.85\.34\.52;/);
+});
+
+test("one address in detail: profile, coverage, logs; ban, unban, allow", async () => {
+  const v = await get("/api/ip/136.85.34.52");
+  assert.equal(v.profile.n, 2);
+  assert.deepEqual(v.profile.seq, ["env-file", "vcs"]);
+  assert.ok(v.coverage.some((c) => c.vendor === "AbuseIPDB"));
+  assert.equal(v.logs.length, 2);
+  let r = await post("/api/ip/136.85.34.52/unban");
+  assert.equal(r.ban, null);
+  assert.ok(got.some((m) => m.t === "unban" && m.ip === "136.85.34.52"));
+  r = await post("/api/ip/198.51.100.7/ban", { reason: "testing" });
+  assert.equal(r.ban.reason, "testing");
+  r = await post("/api/ip/198.51.100.7/allow");
+  assert.equal(r.ban, null); assert.ok(r.allowed);
+});
+
+test("a sign-in from a guard lifts an automatic ban and makes the address yours", async () => {
+  tell({ t: "trust", ip: "104.199.226.84" });
+  await sleep(100);
+  assert.equal(app.brain.state.bans["104.199.226.84"], undefined);
+  assert.ok(app.brain.isTrusted("104.199.226.84"));
+});
+
+test("settings: the key is never shown; the guards get the switches", async () => {
+  const r = await fetch(base() + "/api/settings", { method: "PUT", headers: { "x-bulwark-key": "k", "Content-Type": "application/json" }, body: JSON.stringify({ abuseipdbKey: "secret-abc1234", drop: false }) }).then((x) => x.json());
+  assert.equal(r.abuseipdbKey, "••••••••1234");
+  assert.equal(r.drop, false);
+  await sleep(50);
+  assert.ok(got.some((m) => m.t === "settings" && m.settings.drop === false));
+});

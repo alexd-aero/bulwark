@@ -1,0 +1,16 @@
+{
+  "name": "bulwark",
+  "version": "1.0.0",
+  "description": "Bulwark: a shield for self-hosted gateways. Blocklists, payload detection and bans on every request in microseconds; full request logs, wave warnings, pattern graphs and vendor reporting in its own dashboard.",
+  "license": "MIT",
+  "type": "module",
+  "author": "Alexd Aero",
+  "homepage": "https://github.com/alexd-aero/bulwark",
+  "engines": { "node": ">=18" },
+  "bin": { "bulwark": "bin/bulwark" },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test test/*.test.mjs",
+    "check": "for f in core/*.mjs sensor/*.mjs server.mjs public/*.js; do node --check \"$f\" || exit 1; done && for f in bin/bulwark forge/*.sh; do bash -n \"$f\" || exit 1; done"
+  }
+}

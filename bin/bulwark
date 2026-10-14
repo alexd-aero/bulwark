@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# bulwark: the command line. Talks to the running app on 127.0.0.1.
+#   bulwark status            what it guards, bans, waves
+#   bulwark url               the dashboard's address, with its key
+#   bulwark ban IP [why]      bulwark unban IP      bulwark allow IP
+#   bulwark check IP          everything about an address
+#   bulwark log [-f]          the latest requests (-f: follow)
+set -uo pipefail
+. "$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)/forge/lib.sh"
+[ -n "$NODE" ] || { echo "bulwark: needs Node.js 18+" >&2; exit 1; }
+PORT="$(cfg port)"; KEY="$(cfg key)"; BASE="http://127.0.0.1:$PORT/api"
+call() { curl -fsS --max-time 20 -X "$1" -H "x-bulwark-key: $KEY" -H "Content-Type: application/json" ${3:+--data "$3"} "$BASE$2"; }
+show() { "$NODE" -e "const d = JSON.parse(require('fs').readFileSync(0, 'utf8')); $1"; }
+case "${1:-status}" in
+  status)
+    call GET "/overview?span=24h" | show '
+      const t = d.totals || {}, a = d.alerts || [];
+      console.log(`Bulwark ${d.version}: ${d.sensors.length} host(s) guarded, ${d.bans} banned, ${d.lists.total} addresses on ${d.lists.loaded} lists`);
+      console.log(`last 24 h: ${t.req || 0} requests, ${(t.drop || 0) + (t.block || 0) + (t.ban || 0)} stopped, ${t.newIp || 0} new addresses`);
+      for (const x of a) console.log(`  [${x.sev}] ${x.title}`);' ;;
+  url) echo "http://127.0.0.1:$PORT/?k=$KEY" ;;
+  key) echo "$KEY" ;;
+  ban) [ -n "${2:-}" ] || { echo "bulwark ban IP [why]"; exit 1; }
+    call POST "/ip/$2/ban" "$("$NODE" -e 'console.log(JSON.stringify({reason: process.argv[1] || undefined}))' "${3:-}")" >/dev/null && echo "$2 banned" ;;
+  unban) call POST "/ip/$2/unban" '{}' >/dev/null && echo "$2 unbanned" ;;
+  allow) call POST "/ip/$2/allow" '{}' >/dev/null && echo "$2 is always let through" ;;
+  check) call GET "/ip/$2" | show '
+      const v = d.intel?.verdict || {}, a = d.asn || {};
+      console.log(`${d.ip}  ${String(v.level || "?").toUpperCase()}  ${a.asn ? "AS" + a.asn + " " + a.name : ""} ${a.cc || ""}${a.hosting ? " (hosting)" : ""}`);
+      for (const w of v.why || []) console.log("  • " + w);
+      if (d.ban) console.log(`  banned: ${d.ban.reason}`);
+      console.log("  lists: " + (d.lists.map((l) => l.name).join(", ") || "none"));
+      console.log("  vendors: " + d.coverage.map((c) => `${c.vendor} ${c.knows ? "✓" : "✗"}`).join("  "));
+      if (d.profile) console.log(`  here: ${d.profile.n} requests since ${new Date(d.profile.first).toLocaleString()}, patterns: ${Object.keys(d.profile.sigs).join(", ") || "none"}`);' ;;
+  log)
+    if [ "${2:-}" = -f ]; then
+      curl -fsSN -H "x-bulwark-key: $KEY" "$BASE/stream" | while IFS= read -r line; do
+        case "$line" in data:*) printf '%s\n' "${line#data: }" | show 'if (d.ip) console.log(`${new Date(d.t).toLocaleTimeString()}  ${d.dec.padEnd(5)} ${d.ip.padEnd(16)} ${d.m} ${d.host || ""}${d.path}  ${d.st || ""}${d.why ? "  · " + d.why : ""}`)';; esac
+      done
+    else call GET "/logs?limit=40" | show 'for (const e of d.logs.reverse()) console.log(`${new Date(e.t).toLocaleTimeString()}  ${e.dec.padEnd(5)} ${e.ip.padEnd(16)} ${e.m} ${e.host || ""}${e.path}  ${e.st || ""}${e.why ? "  · " + e.why : ""}`)'; fi ;;
+  *) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//' ;;
+esac

@@ -1,0 +1,34 @@
+{
+  "spec": 1,
+  "id": "bulwark",
+  "name": "Bulwark",
+  "version": "1.0.0",
+  "description": "A shield for everything you publish. Every request is checked in microseconds against 250k+ blocklisted addresses and known attack payloads; attackers are banned on every tunnel at once. Its own dashboard shows every request in full, warns about waves of attackers before they peak, graphs the patterns, keeps your blocklist and reports attackers to the vendors that missed them. On by default; no slower tunnels.",
+  "author": "Alexd Aero",
+  "license": "MIT",
+  "homepage": "https://github.com/alexd-aero/bulwark",
+  "logo": "public/logo.svg",
+  "platforms": ["burrow", "selkies-forge"],
+  "requires": {
+    "burrow": ">=2.15.0",
+    "commands": ["curl"]
+  },
+  "scripts": {
+    "install": "forge/install.sh",
+    "update": "forge/install.sh",
+    "uninstall": "forge/uninstall.sh",
+    "status": "forge/status.sh"
+  },
+  "actions": [
+    { "id": "start", "label": "Start", "script": "forge/start.sh" },
+    { "id": "restart", "label": "Restart", "script": "forge/restart.sh" },
+    { "id": "stop", "label": "Stop", "script": "forge/stop.sh", "confirm": "The dashboard, lookups, waves and reports stop. The guard inside Burrow keeps enforcing bans and blocklists on its own." }
+  ],
+  "burrow": {
+    "extension": "sensor/burrow.mjs",
+    "ui": "sensor/panel.js"
+  },
+  "links": [
+    { "label": "How it works", "url": "https://github.com/alexd-aero/bulwark#how-it-works" }
+  ]
+}
