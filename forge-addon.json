@@ -8,6 +8,23 @@
   "license": "MIT",
   "homepage": "https://github.com/alexd-aero/bulwark",
   "logo": "public/logo.svg",
+  "update_card": {
+    "theme": "red",
+    "icon": "shield",
+    "style": "glow",
+    "badge": "PROTECTION",
+    "title": "{name} {version}",
+    "tagline": "See who attacks you, and how, at a glance.",
+    "highlights": [
+      "Patterns, rebuilt: a clear flow from networks to attacks",
+      "Every pattern ranked; campaigns as cards",
+      "Your devices, recognized by their device keys",
+      "Public tunnels scan new visitors before letting them in",
+      "Fixed: history lines showing twice in the log"
+    ],
+    "button": "Update to {version}",
+    "notes": "https://github.com/alexd-aero/bulwark/commits/main"
+  },
   "platforms": ["burrow", "selkies-forge"],
   "requires": {
     "burrow": ">=2.15.0",
