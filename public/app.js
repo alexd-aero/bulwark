@@ -19,6 +19,9 @@ const ICONS = {
   ban: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="m5.6 5.6 12.8 12.8"/></svg>',
   layers: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 13 9 5 9-5" opacity=".6"/></svg>',
   send: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M21 3 10 14M21 3l-7 18-4-7-7-4 18-7Z"/></svg>',
+  device: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="2" y="4" width="14" height="10" rx="1.5"/><path d="M6 18h6M9 14v4"/><rect x="17" y="8" width="5" height="12" rx="1.2"/></svg>',
+  phone: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="6.5" y="2.5" width="11" height="19" rx="2.2"/><path d="M10.5 18.5h3"/></svg>',
+  laptop: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="4" y="4.5" width="16" height="11" rx="1.5"/><path d="M2 19.5h20"/></svg>',
   gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>',
 };
 for (const i of document.querySelectorAll("[data-i]")) i.innerHTML = ICONS[i.dataset.i] || "";
@@ -26,7 +29,9 @@ for (const i of document.querySelectorAll("[data-i]")) i.innerHTML = ICONS[i.dat
 const DEC = { pass: ["pass", "through"], drop: ["drop", "payload dropped"], block: ["block", "blocked"], ban: ["ban", "banned"], seen: ["seen", "from the host's history"] };
 const SEVP = { critical: "crit", warn: "warn", info: "info" };
 const SPAN_KEYS = ["15m", "1h", "6h", "24h", "7d", "30d", "90d"];
-const S = { view: "overview", span: localStore("span") || "24h", gspan: "24h", ov: null, logs: [], logF: { dec: "", sig: "", q: "", ip: "", host: "" }, paused: false,
+// your devices (the host's device keys): id -> name, for the log and the address drawer
+const devName = (id) => S.devices?.find((d) => d.id === id)?.name || "one of your devices";
+const S = { devices: null, view: "overview", span: localStore("span") || "24h", gspan: "24h", ov: null, logs: [], logF: { dec: "", sig: "", q: "", ip: "", host: "" }, paused: false,
             open: null, alerts: null, bl: null, lists: null, vendors: null, settings: null, ip: null, live: false, newIds: new Set() };
 let charts = {};
 function localStore(k, v) { try { if (v === undefined) return localStorage.getItem("bulwark-" + k); localStorage.setItem("bulwark-" + k, v); } catch { return null; } }
@@ -116,7 +121,7 @@ async function loadLog(more) {
 const logMatches = (e) => { const f = S.logF; if (f.dec && (f.dec === "bad" ? e.dec === "pass" : e.dec !== f.dec)) return false; if (f.sig && (f.sig === "any" ? !e.sig : e.sig !== f.sig)) return false; if (f.ip && e.ip !== f.ip) return false; if (f.host && e.host !== f.host) return false; if (f.q && !`${e.ip} ${e.host} ${e.path} ${e.ua} ${e.why || ""} ${e.org || ""}`.toLowerCase().includes(f.q.toLowerCase())) return false; return true; };
 function logRow(e) {
   return `<tr class="click d-${h(e.dec)} ${S.newIds.has(e.id) ? "new" : ""}" data-act="logrow" data-id="${e.id}">
-    <td class="faint mono">${clock(e.t)}</td><td>${decPill(e.dec)}</td><td>${ipBtn(e.ip, e.cc)}${e.dc ? ' <span class="pill dc">hosting</span>' : ""}${e.auth ? ' <span class="pill ok">you</span>' : ""}</td>
+    <td class="faint mono">${clock(e.t)}</td><td>${decPill(e.dec)}</td><td>${ipBtn(e.ip, e.cc)}${e.dc ? ' <span class="pill dc">hosting</span>' : ""}${e.dev ? ` <span class="pill ok dev" title="${h(devName(e.dev))}: recognized by its device key">${h(devName(e.dev))}</span>` : e.auth ? ' <span class="pill ok">you</span>' : ""}</td>
     <td class="mono">${h(e.m)}</td><td class="mono path" title="${h(e.path)}"><span class="faint">${h((e.host || "").split(".")[0])}</span>${h(e.path)}</td>
     <td class="mono st${String(e.st || 0)[0]}">${e.st || "–"}</td><td class="mono faint">${e.ms != null ? e.ms + "ms" : ""}</td>
     <td>${e.sig ? `<span class="pill ${e.sc === 3 ? "block" : "drop"}">${h(e.sig)}</span>` : ""}</td><td class="why" title="${h(e.org || "")}">${h(e.org || "")}</td></tr>
@@ -127,7 +132,7 @@ function logDetail(e) {
     ["Host", `${e.host || "–"}${e.port ? ` (tunnel ${e.port})` : e.main ? " (dashboard)" : ""}`], ["Request", `${e.m} ${e.path}`], ["Status", `${e.st || "–"} · ${fmtB(e.b || 0)}${e.ms != null ? ` · ${e.ms} ms` : ""}${e.ws ? " · WebSocket" : ""}`],
     ["Decision", `${DEC[e.dec]?.[1] || e.dec}${e.why ? ` · ${e.why}` : ""}`], ["Pattern", e.sig ? `${e.sig} (${e.sc === 3 ? "payload" : "probe"})` : "–"], ["Lists", (e.lists || []).join(", ") || "–"],
     ["User agent", e.ua || "–"], ["Referer", e.ref || "–"], ["Language", e.lang || "–"], ["Came via", `${e.via || "–"}${e.ray ? ` · ray ${e.ray}` : ""}${e.proto ? ` · HTTP/${e.proto}` : ""}`],
-    ["Signed in", e.auth === undefined ? "not checked" : e.auth ? "yes" : "no"], ["Log id", `#${e.id}${e.src ? ` · from ${e.src === "aegis-burrow" ? "Aegis's" : "the host's"} history` : ""}`]];
+    ["Signed in", e.auth === undefined ? "not checked" : e.auth ? "yes" : "no"], ["Device", e.dev ? `${devName(e.dev)} (its device key)` : "not one of yours, or never signed in"], ["Log id", `#${e.id}${e.src ? ` · from ${e.src === "aegis-burrow" ? "Aegis's" : "the host's"} history` : ""}`]];
   return `<dl class="kv">${kv.map(([k, v]) => `<dt>${k}</dt><dd class="${k === "Request" || k === "User agent" ? "mono" : ""}">${h(v)}</dd>`).join("")}</dl>
     <div class="row" style="margin-top:10px"><button class="btn sm" data-act="ip" data-ip="${h(e.ip)}">This address</button><button class="btn sm ghost" data-act="logf" data-k="ip" data-v="${h(e.ip)}">Only this address</button>${e.host ? `<button class="btn sm ghost" data-act="logf" data-k="host" data-v="${h(e.host)}">Only ${h(e.host)}</button>` : ""}</div>`;
 }
@@ -333,6 +338,50 @@ async function renderSettings() {
     </div>`;
 }
 
+// ------------------------------------------------------------------ your devices
+// Every browser that signed in to the host, recognized by its device key (sealed
+// by the host, never guessed). Rename and forget go to the host itself.
+const underHost = location.pathname.startsWith("/__gate/");
+async function loadDevices(quiet) {
+  const r = await api("devices");
+  S.devices = r.devices; S.devAt = r.at; S.devHost = r.host;
+  if (underHost) { try { const g = await (await fetch("/__gate/api/devices")).json(); S.devThis = g.devices?.find((d) => d.this)?.id || null; } catch { /* not signed in here */ } }
+  const c = $("#devCount"); if (c) c.textContent = S.devices.length ? S.devices.length : "";
+  if (!quiet && S.view === "log") renderLog();
+}
+const devKind = (d) => /iPhone|Android phone|Android tablet|iPad/.test(d.auto || d.name) ? "phone" : "laptop";
+function devCard(d) {
+  const ips = d.ips || [];
+  return `<section class="card dev-card${d.id === S.devThis ? " this" : ""}">
+    <div class="dev-top"><span class="dev-ic">${ICONS[devKind(d)]}</span>
+      <div class="grow"><b>${h(d.name)}</b>${d.named ? `<span class="faint small"> · ${h(d.auto)}</span>` : ""}
+        <div class="faint small">${d.id === S.devThis ? '<span class="pill ok">this device</span> ' : ""}last seen ${ago(d.last)} · signed in first ${new Date(d.first).toLocaleDateString()}</div></div>
+      ${underHost ? `<div class="row"><button class="btn sm ghost" data-act="devname" data-id="${h(d.id)}">Rename</button><button class="btn sm ghost" data-act="devforget" data-id="${h(d.id)}">Forget</button></div>` : ""}</div>
+    <div class="dev-ips">${ips.slice(0, 6).map((a) => `<div class="dev-ip">${ipBtn(a.ip, a.cc)}<span class="faint small">${h(a.org || "")}${a.dc ? ' <span class="pill dc">hosting</span>' : ""}</span><span class="faint small mono">${ago(a.last)}</span></div>`).join("")}
+      ${ips.length > 6 ? `<div class="faint small">and ${ips.length - 6} more</div>` : ""}</div>
+    ${d.hosts?.length ? `<div class="faint small dev-hosts">Opened ${d.hosts.slice(0, 4).map((x) => `<span class="mono">${h(x.host.split(".")[0])}</span>`).join(", ")}${d.hosts.length > 4 ? ` and ${d.hosts.length - 4} more` : ""}</div>` : ""}
+  </section>`;
+}
+function renderDevices() {
+  const list = S.devices || [];
+  app.innerHTML = `
+    <div class="head"><div><h1>Your devices</h1><p>Every browser that signed in to your host, from any address, signed in right now or not.</p></div></div>
+    <section class="card dev-how"><div class="dev-how-in">
+      <div><b>Recognized for sure</b><span class="muted small">A sign-in gives the browser a device key, sealed by your host. It can't be guessed or copied into another key, and it follows the browser onto your tunnels. Requests carrying it are yours: never dropped, never banned, marked in the live log.</span></div>
+      <div><b>The rest is never guessed</b><span class="muted small">A device that never signed in (a phone on your Wi-Fi opening a public tunnel) carries nothing to recognize. No address or browser trick tells it apart for certain, so Bulwark doesn't pretend: the addresses your devices used lately are trusted instead, so nothing on them is banned automatically.</span></div>
+    </div></section>
+    ${!S.devHost ? '<div class="card muted">No host is connected right now: this is the last list it sent.</div>' : ""}
+    ${list.length ? `<div class="grid g2">${list.map(devCard).join("")}</div>` : '<div class="card muted">No device has signed in since your host learned device keys. Sign in once on each device (or sign out and in again) and it shows up here.</div>'}`;
+}
+async function hostDevices(method, id, body) {
+  const r = await fetch(`/__gate/api/devices/${encodeURIComponent(id)}`, { method, headers: { "Content-Type": "application/json", "X-Gate": "1" }, body: body ? JSON.stringify(body) : undefined });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+  await post("devices/refresh").catch(() => {});
+  await new Promise((res) => setTimeout(res, 600));
+  await loadDevices(true); renderDevices();
+}
+
 // ------------------------------------------------------------------ one address
 async function openIp(ip) {
   const d = $("#drawer"), inn = $("#drawerIn");
@@ -344,12 +393,13 @@ function drawIp() {
   const v = S.ip, p = v.profile, a = v.asn, i = v.intel || {}, o = i.owner || {};
   const verdict = i.verdict ? `<span class="pill ${i.verdict.level === "malicious" ? "block" : i.verdict.level === "suspicious" ? "drop" : i.verdict.level === "clean" ? "ok" : ""}">${h(i.verdict.level)}</span>` : "";
   $("#drawerIn").innerHTML = `
-    <div class="row"><h2>${flag(p?.cc || a?.cc)} ${h(v.ip)}</h2>${verdict}${v.ban ? '<span class="pill ban">banned</span>' : ""}${v.trusted ? '<span class="pill ok">yours</span>' : ""}${v.own ? '<span class="pill drop">this machine</span>' : ""}${v.allowed ? '<span class="pill ok">allowed</span>' : ""}<span class="spacer"></span><button class="btn sm ghost" data-act="closedrawer">✕</button></div>
+    <div class="row"><h2>${flag(p?.cc || a?.cc)} ${h(v.ip)}</h2>${verdict}${v.ban ? '<span class="pill ban">banned</span>' : ""}${v.devices?.length ? '<span class="pill ok">your device</span>' : v.trusted ? '<span class="pill ok">yours</span>' : ""}${v.own ? '<span class="pill drop">this machine</span>' : ""}${v.allowed ? '<span class="pill ok">allowed</span>' : ""}<span class="spacer"></span><button class="btn sm ghost" data-act="closedrawer">✕</button></div>
     <div class="muted">${h([a ? `AS${a.asn} ${a.name}` : o.org, o.city, a?.cc || o.country].filter(Boolean).join(" · "))}${a?.hosting ? ' <span class="pill dc">hosting</span>' : ""}${o.hostname ? ` <span class="mono faint">${h(o.hostname)}</span>` : ""}</div>
     ${i.verdict?.why?.length ? `<div class="row">${i.verdict.why.map((w) => `<span class="pill">${h(w)}</span>`).join("")}</div>` : ""}
     <div class="row">${v.ban ? `<button class="btn" data-act="unban" data-ip="${h(v.ip)}">Unban</button>` : `<button class="btn danger" data-act="ban" data-ip="${h(v.ip)}">Ban</button>`}
       ${v.allowed ? `<button class="btn ghost" data-act="disallow" data-ip="${h(v.ip)}">Stop allowing</button>` : `<button class="btn ghost" data-act="allow" data-ip="${h(v.ip)}">Always allow</button>`}
       <button class="btn ghost" data-act="report" data-ip="${h(v.ip)}">Report to vendors</button><button class="btn ghost" data-act="logf" data-k="ip" data-v="${h(v.ip)}">Its log</button></div>
+    ${v.devices?.length ? `<section class="card"><h3>Your devices on it</h3>${v.devices.map((d) => `<div class="row"><a href="#/devices" class="dev-link">${ICONS.device}${h(d.name)}</a><span class="faint small">${ago(d.last)}</span></div>`).join("")}<p class="faint small" style="margin:8px 0 0">Recognized by their device keys, so this address is trusted and never banned automatically.</p></section>` : ""}
     ${v.ban ? `<section class="card"><h3>Banned</h3><dl class="kv"><dt>Why</dt><dd>${h(v.ban.reason)}</dd><dt>By</dt><dd>${h(v.ban.source)}</dd><dt>Since</dt><dd>${new Date(v.ban.at).toLocaleString()}</dd><dt>Until</dt><dd>${v.ban.until ? new Date(v.ban.until).toLocaleString() : "for good"}</dd><dt>Turned away</dt><dd>${fmtN(v.ban.hits || 0)} requests since</dd>${v.ban.lines?.length ? `<dt>Evidence</dt><dd class="mono">${v.ban.lines.map(h).join("<br>")}</dd>` : ""}</dl></section>` : ""}
     <section class="card"><h3>Who knows it <span class="faint">vendors</span></h3><div class="cov">${v.coverage.map((c) => `<div class="${c.knows ? "k" : v.ban ? "miss" : ""}"><span>${h(c.vendor)}</span><span class="pill ${c.knows ? "ok" : ""}" title="${h(c.how)}">${c.knows ? "knows" : "missed"}</span></div>`).join("")}</div></section>
     ${p ? `<section class="card"><h3>Here</h3><dl class="kv"><dt>First seen</dt><dd>${new Date(p.first).toLocaleString()}</dd><dt>Last seen</dt><dd>${ago(p.last)}</dd><dt>Requests</dt><dd>${fmtN(p.n)} · ${fmtB(p.bytes)}</dd>
@@ -380,7 +430,7 @@ function chrome() {
   $("#railFoot").innerHTML = `<div><b>${o.sensors.length}</b> ${o.sensors.length === 1 ? "host" : "hosts"} guarded</div><div><b>${fmtN(o.lists.total)}</b> on ${o.lists.loaded} lists</div><div class="faint">v${h(o.version)}</div>`;
 }
 const VIEWS = { overview: [loadOverview, renderOverview], log: [loadLog, renderLog], waves: [loadWaves, renderWaves], patterns: [null, renderPatterns],
-                addresses: [loadBl, renderBl], lists: [null, renderLists], vendors: [null, renderVendors], settings: [null, renderSettings] };
+                devices: [loadDevices, renderDevices], addresses: [loadBl, renderBl], lists: [null, renderLists], vendors: [null, renderVendors], settings: [null, renderSettings] };
 async function show(view) {
   S.view = VIEWS[view] ? view : "overview";
   for (const a of document.querySelectorAll("#nav a")) a.classList.toggle("on", a.dataset.v === S.view);
@@ -399,6 +449,8 @@ function route() {
   show((location.hash.replace(/^#\/?/, "") || "overview").split("?")[0]);
 }
 window.addEventListener("hashchange", route);
+loadDevices(true).catch(() => {});
+setInterval(() => { if (!document.hidden) loadDevices(true).catch(() => {}); }, 60e3);
 
 // refresh what's on screen (not the log: that one is live)
 setInterval(async () => {
@@ -446,6 +498,14 @@ document.addEventListener("click", async (e) => {
     else if (act === "gfit") { charts.graph?.fit(); charts.graph?.draw(); }
     else if (act === "ip") { e.stopPropagation(); openIp(ip); }
     else if (act === "closedrawer") closeDrawer();
+    else if (act === "devname") {
+      const d = S.devices.find((x) => x.id === el.dataset.id), name = prompt("A name for this device (empty: its browser and system)", d?.named ? d.name : "");
+      if (name !== null) { await hostDevices("PATCH", el.dataset.id, { name }); toast("Renamed"); }
+    }
+    else if (act === "devforget") {
+      const d = S.devices.find((x) => x.id === el.dataset.id);
+      if (confirm(`Forget ${d?.name || "this device"}? Its device key stops working; it's recognized again once it signs in.`)) { await hostDevices("DELETE", el.dataset.id); toast("Forgotten"); }
+    }
     else if (act === "logrow") { if (e.target.closest("a")) return; const id = Number(el.dataset.id); S.open = S.open === id ? null : id; renderLog(); }
     else if (act === "logf") { S.logF[el.dataset.k] = el.dataset.v; closeDrawer(); if (location.hash !== "#/log") location.hash = "#/log"; else { await loadLog(); renderLog(); } }
     else if (act === "logmore") await logMore(el);

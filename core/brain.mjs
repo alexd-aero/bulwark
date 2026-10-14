@@ -150,8 +150,23 @@ export class Brain {
       case "ban": this.recordBan(m.ip, m.b, m.info || {}); break;
       case "trust": this.trust(m.ip, false); break;
       case "history": try { this.importHistory(m.data || {}, m.host); } catch (err) { this.log("history:", err.message); } break;
+      case "devices": this.useDevices(m); break;
     }
   }
+  // Your devices, from the host's device keys: {list: [{id, name, ips, hosts, last…}], addresses: {ip: {last, devices}}}.
+  // Recognizing them is exact (a sealed key, not a guess); their addresses are trusted as of when they were used.
+  useDevices(m) {
+    this.devices = { list: Array.isArray(m.list) ? m.list : [], addresses: m.addresses || {}, at: Date.now() };
+    for (const [raw, a] of Object.entries(this.devices.addresses)) {
+      const ip = normIp(raw);
+      if (!isIP(ip) || isPrivate(ip) || this.own.has(ip) || !(a?.last > 0)) continue;
+      if ((this.state.trusted[ip] || 0) < a.last) { this.state.trusted[ip] = a.last; this.dirty = true; }
+      const b = this.state.bans[ip];
+      if (b && b.source !== "manual" && a.last > (b.at || 0)) { delete this.state.bans[ip]; this.action(ip, "lifted", "one of your devices uses it"); this.broadcast({ t: "unban", ip }); }
+    }
+  }
+  devicesAt(ip) { return (this.devices?.list || []).filter((d) => d.ips?.some((x) => x.ip === ip)).map((d) => ({ id: d.id, name: d.name, last: d.ips.find((x) => x.ip === ip).last })); }
+  refreshDevices() { this.broadcast({ t: "devices?" }); }
   // ask the guards for the host's past again (Settings → "Pull from Aegis")
   pullHistory() { if (!this.sensors.size) throw new Error("No host is connected."); this.broadcast({ t: "pull", since: 0 }); }
 

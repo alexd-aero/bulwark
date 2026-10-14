@@ -135,6 +135,23 @@ test("state from the app replaces the guard's, and the log line carries everythi
   assert.equal(e.dec, "block"); assert.equal(e.why, "by hand"); assert.equal(e.port, 27715); assert.equal(e.st, 403); assert.equal(e.ua, "curl/8");
 });
 
+test("your devices: their addresses are trusted as of when used; a request with a device key is marked and never banned", () => {
+  const { g } = guard({ ipsum: "45.148.10.120\t4\n" });
+  const long = Date.now() - 40 * 864e5, recent = Date.now() - 864e5;
+  g.apply({ t: "devices", addresses: { "198.51.100.7": { last: recent }, "198.51.100.8": { last: long } } });
+  assert.equal(g.isTrusted("198.51.100.7"), true);
+  assert.equal(g.isTrusted("198.51.100.8"), false, "used 40 days ago: no longer");
+  g.trust("198.51.100.9");
+  g.apply({ t: "devices", addresses: { "198.51.100.9": { last: long } } });
+  assert.equal(g.isTrusted("198.51.100.9"), true, "an older time never pushes back a newer one");
+  // a device key on a strong-listed address (a phone on a dirty mobile network)
+  const info = { path: "/.env", host: "x.example", device: "dev-a", trusted: () => true };
+  assert.equal(g.gate("45.148.10.120", info), null);
+  assert.equal(g.bans.has("45.148.10.120"), false);
+  assert.equal(g.entry("45.148.10.120", info, { status: 200 }).dev, "dev-a");
+  assert.equal(g.entry("203.0.113.1", { path: "/" }, {}).dev, undefined);
+});
+
 test("fast: 100k decisions well under a second", () => {
   const lines = [];
   for (let i = 0; i < 50000; i++) lines.push(`${(i >> 16) & 255}.${(i >> 8) & 255}.${i & 255}.${(i * 7) & 255}\t1`);

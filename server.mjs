@@ -80,7 +80,7 @@ export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", 
     const intel = await checkIp(ip).catch((e) => ({ error: e.message }));
     const lists = brain.feeds.lookup(ip);
     return {
-      ip, profile: p, ban: brain.state.bans[ip] || null, allowed: brain.state.allow[ip] || null, trusted: brain.isTrusted(ip), own: brain.own.has(ip),
+      ip, profile: p, devices: brain.devicesAt(ip), ban: brain.state.bans[ip] || null, allowed: brain.state.allow[ip] || null, trusted: brain.isTrusted(ip), own: brain.own.has(ip),
       asn: brain.asn.lookup(ip), net24: netOf(ip), net16: netOf(ip, true), lists, intel, verdict: brain.verdicts.get(ip) ? { ...brain.verdicts.get(ip), intel: undefined } : null,
       coverage: brain.reporters.coverage(ip, lists, intel.error ? null : intel),
       alerts: brain.waves.list(300).filter((a) => a.members?.includes(ip)).map(({ id, title, sev, kind, open, first, last }) => ({ id, title, sev, kind, open, first, last })),
@@ -190,6 +190,12 @@ export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", 
       return send(res, 200, await ipView(ip));
     }
     if (path === "/alerts" && m === "GET") return send(res, 200, { alerts: brain.waves.list(200), baseline: brain.waves.baseline(), strictUntil: brain.strictUntil });
+    // your devices (from the host's device keys), each address with its network
+    if (path === "/devices" && m === "GET") {
+      const d = brain.devices || { list: [], at: null };
+      return send(res, 200, { at: d.at, host: brain.sensors.size > 0, devices: d.list.map((x) => ({ ...x, ips: (x.ips || []).map((a) => { const n = isIP(a.ip) ? brain.asn.lookup(a.ip) : null; return { ...a, cc: n?.cc || "", org: n?.name || "", dc: !!n?.hosting }; }) })) });
+    }
+    if (path === "/devices/refresh" && m === "POST") { brain.refreshDevices(); return send(res, 200, { ok: true }); }
     if (path === "/alerts/close" && m === "POST") {
       const b = await readJson(req), a = [...brain.waves.alerts.values()].find((x) => x.id === b.id);
       if (a && a.open) { a.open = false; a.closed = Date.now(); a.dismissed = true; }

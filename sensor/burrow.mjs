@@ -13,6 +13,9 @@
 //                            clients and recent requests, the audit log): sent
 //                            to the app when it connects, and when you ask
 //   ctx.notify()             the app's warnings, on the gate's dashboard (the bell)
+//   ctx.devices()            your devices (the gate's device keys) and the addresses
+//                            they used lately: those are trusted here, and the app
+//                            shows them (sent on connect, every minute, and when asked)
 //   handle(...)              /__gate/api/x/bulwark/… -> the app's API
 //
 // The app (server.mjs, its own service) does everything else, and sends the
@@ -29,7 +32,7 @@ import { RangeSet, lookupIn } from "../core/lists.mjs";
 import { Guard } from "./guard.mjs";
 
 let ctx = null, cfg = null, P = null, guardObj = null, sock = null, buf = "", queue = [], dropped = 0, pending = [];
-let flushTimer = null, retryTimer = null, feedsWatch = null, feedsTimer = null, stopped = true, connectedAt = 0;
+let flushTimer = null, devicesTimer = null, retryTimer = null, feedsWatch = null, feedsTimer = null, stopped = true, connectedAt = 0;
 const MAX_QUEUE = 5000;
 
 function log(...a) { ctx?.log?.(...a); }
@@ -54,6 +57,7 @@ function connectApp() {
     for (const m of pending.splice(0)) send(m);
     flush();
     sendHistory();
+    sendDevices();
   });
   s.on("data", (d) => {
     buf += d.toString("utf8");
@@ -64,6 +68,7 @@ function connectApp() {
       if (m.t === "kick") { try { ctx?.kick?.(m.ip); } catch { /* best effort */ } continue; }
       if (m.t === "feeds") { loadLists(); continue; }
       if (m.t === "pull") { sendHistory(m.since || 0); continue; }
+      if (m.t === "devices?") { sendDevices(); continue; }
       if (m.t === "notify") { try { ctx?.notify?.({ level: m.level, title: m.title, body: m.body, link: m.link, key: m.key }); } catch (e) { log("notify:", e.message); } continue; }
       guardObj.apply(m);
     }
@@ -82,6 +87,16 @@ function sendHistory(since = 0) {
   if (typeof ctx?.history !== "function") return;
   try { send({ t: "history", host: "aegis-burrow", at: Date.now(), data: ctx.history({ since }) }); }
   catch (e) { log("history:", e.message); }
+}
+
+// your devices, from the gate (older hosts don't know them)
+function sendDevices() {
+  if (typeof ctx?.devices !== "function" || !guardObj) return;
+  try {
+    const d = ctx.devices();
+    guardObj.apply({ t: "devices", addresses: d.addresses });
+    send({ t: "devices", at: Date.now(), list: d.list, addresses: d.addresses });
+  } catch (e) { log("devices:", e.message); }
 }
 
 // the lists, parsed in a worker thread and swapped in whole
@@ -113,11 +128,14 @@ export async function start(hostCtx) {
   try { feedsWatch = watch(P.feeds, { persistent: false }, () => { clearTimeout(feedsTimer); feedsTimer = setTimeout(loadLists, 5000); }); } catch { /* no folder yet */ }
   flushTimer = setInterval(flush, 250);
   flushTimer.unref?.();
+  devicesTimer = setInterval(sendDevices, 60e3);
+  devicesTimer.unref?.();
+  sendDevices();
   connectApp();
 }
 export function stop() {
   stopped = true;
-  clearInterval(flushTimer); clearTimeout(retryTimer); clearTimeout(feedsTimer);
+  clearInterval(flushTimer); clearInterval(devicesTimer); clearTimeout(retryTimer); clearTimeout(feedsTimer);
   try { feedsWatch?.close(); } catch { /* gone */ }
   flush();
   try { sock?.end(); } catch { /* gone */ }

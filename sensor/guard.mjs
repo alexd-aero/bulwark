@@ -61,6 +61,8 @@ export class Guard {
       case "own": this.own = new Set(m.list); break;
       case "trust": this.trusted.set(m.ip, m.at || Date.now()); break;
       case "strict": this.strictUntil = m.until || 0; break;
+      // the addresses your devices used lately (the host's device keys): yours, as of when they were used
+      case "devices": for (const [ip, a] of Object.entries(m.addresses || {})) if (!this.own.has(ip) && (this.trusted.get(ip) || 0) < a.last) this.trusted.set(ip, a.last); break;
       case "listadd": {                                     // new addresses on a list: added in place
         let sets = this.lists.get(m.id);
         if (!sets) { sets = {}; this.lists.set(m.id, sets); }
@@ -187,6 +189,7 @@ export class Guard {
     if (bw.own) e.own = true;
     if (bw.local) e.local = true;
     if (info.ws) e.ws = true;
+    if (info.device) e.dev = info.device;         // one of your devices, by its device key
     return e;
   }
 }

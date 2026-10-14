@@ -140,6 +140,27 @@ test("a sign-in from a guard lifts an automatic ban and makes the address yours"
   assert.ok(app.brain.isTrusted("104.199.226.84"));
 });
 
+test("your devices: the host's list comes in, their addresses are trusted as of when used, an automatic ban on one lifts", async () => {
+  await post("/api/ip/192.0.2.40/ban", { reason: "x" });
+  app.brain.state.bans["192.0.2.40"].source = "payload";                 // as if the guard had banned it
+  app.brain.state.bans["192.0.2.40"].at = Date.now() - 60e3;
+  const used = Date.now() - 3600e3;
+  tell({ t: "devices", list: [{ id: "dev-a", name: "Chrome on Windows", ips: [{ ip: "192.0.2.40", last: Date.now() - 5e3 }, { ip: "192.0.2.41", last: used }], hosts: [], first: used, last: Date.now() }],
+         addresses: { "192.0.2.40": { last: Date.now() - 5e3, devices: ["dev-a"] }, "192.0.2.41": { last: used, devices: ["dev-a"] }, "10.0.0.5": { last: Date.now(), devices: ["dev-a"] } } });
+  assert.ok(await until(() => app.brain.devices?.list.length === 1));
+  assert.equal(app.brain.state.bans["192.0.2.40"], undefined, "lifted: one of your devices uses it");
+  assert.equal(app.brain.state.trusted["192.0.2.41"], used, "trusted as of when it was used, not now");
+  assert.equal(app.brain.state.trusted["10.0.0.5"], undefined, "private addresses aren't the point");
+  const d = await get("/api/devices");
+  assert.equal(d.devices[0].name, "Chrome on Windows");
+  assert.equal(d.devices[0].ips.length, 2);
+  const v = await get("/api/ip/192.0.2.41");
+  assert.deepEqual(v.devices.map((x) => x.name), ["Chrome on Windows"]);
+  got.length = 0;
+  await post("/api/devices/refresh");
+  assert.ok(await until(() => got.some((m) => m.t === "devices?")), "the guard is asked again");
+});
+
 test("settings: the key is never shown; the guards get the switches", async () => {
   const r = await fetch(base() + "/api/settings", { method: "PUT", headers: { "x-bulwark-key": "k", "Content-Type": "application/json" }, body: JSON.stringify({ abuseipdbKey: "secret-abc1234", drop: false }) }).then((x) => x.json());
   assert.equal(r.abuseipdbKey, "••••••••1234");
