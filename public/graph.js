@@ -7,8 +7,8 @@
 // A connection's width is how many addresses travelled it. Hover anything to
 // trace it; click a card or a connection and the panel beside the canvas tells
 // everything about it, down to each address (click one for its drawer). Drag
-// the canvas to move around, drag a card to move it, Ctrl + scroll (or pinch)
-// to zoom; "Fit" brings everything back into view, "Tidy up" lays it out again.
+// the canvas to move around, drag a card to move it, scroll (or pinch) to
+// zoom; "Fit" brings everything back into view, "Tidy up" lays it out again.
 
 const NODE_W = 250, NODE_H = 56, COL_GAP = 150, ROW_GAP = 10, GROUP_GAP = 34;
 const COLORS = { net: "var(--pass-hi)", payload: "var(--block)", probe: "var(--drop)",
@@ -46,7 +46,7 @@ export class Workflow {
     this.moved = new Map();              // cards you dragged: id -> {x, y}
     el.classList.add("wf");
     el.innerHTML = `
-      <div class="wf-canvas" tabindex="0" aria-label="Attack workflow. Drag to move around, Ctrl and scroll to zoom.">
+      <div class="wf-canvas" tabindex="0" aria-label="Attack workflow. Drag to move around, scroll to zoom.">
         <div class="wf-world"><svg class="wf-edges" width="10" height="10" aria-hidden="true"></svg><div class="wf-labels"></div><div class="wf-nodes"></div></div>
         <div class="wf-controls" role="toolbar" aria-label="Canvas">
           <button type="button" data-wf="in" title="Zoom in" aria-label="Zoom in">${ICON.plus}</button>
@@ -56,7 +56,7 @@ export class Workflow {
           <button type="button" data-wf="full" title="Full screen (F)" aria-label="Full screen" aria-pressed="false">${ICON.full}</button>
           <span class="wf-zoom">100%</span>
         </div>
-        <div class="wf-hint">drag to move · <kbd>Ctrl</kbd> + scroll to zoom · <kbd>F</kbd> full screen · click a card or a line</div>
+        <div class="wf-hint">drag to move · scroll to zoom · <kbd>F</kbd> full screen · click a card or a line</div>
         <div class="wf-tip" hidden></div>
       </div>
       <aside class="wf-panel" aria-live="polite"></aside>`;
@@ -382,11 +382,12 @@ export class Workflow {
     c.addEventListener("pointerup", end);
     c.addEventListener("pointercancel", (e) => { ptrs.delete(e.pointerId); drag = null; c.classList.remove("panning"); });
     c.addEventListener("pointerleave", () => { if (!drag) { this.tip.hidden = true; this.applySel(); } });
+    // the scroll wheel zooms in and out where the pointer is (a trackpad's pinch too);
+    // the page still scrolls with the pointer anywhere outside the canvas
     c.addEventListener("wheel", (e) => {
-      if (!(e.ctrlKey || e.metaKey)) return;            // a plain scroll scrolls the page
       e.preventDefault();
-      const p = local(e);
-      this.zoomAt(Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0022)), p.x, p.y);
+      const p = local(e), dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
+      this.zoomAt(Math.exp(-Math.max(-160, Math.min(160, dy)) * (e.ctrlKey ? 0.008 : 0.0016)), p.x, p.y);
     }, { passive: false });
     c.addEventListener("keydown", (e) => {
       const node = e.target.closest?.(".wf-node");

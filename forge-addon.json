@@ -2,7 +2,7 @@
   "spec": 1,
   "id": "bulwark",
   "name": "Bulwark",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "description": "A shield for everything you publish. Every request is checked in microseconds against 250k+ blocklisted addresses and known attack payloads; attackers are banned on every tunnel at once. Its own dashboard shows every request in full, warns about waves of attackers before they peak, graphs the patterns, keeps your blocklist and reports attackers to the vendors that missed them. On by default; no slower tunnels.",
   "author": "Alexd Aero",
   "license": "MIT",
@@ -16,7 +16,7 @@
     "title": "{name} {version}",
     "tagline": "Patterns is now a workflow you can click through.",
     "highlights": [
-      "New: a real full-screen button for the Patterns graph (or press F)",
+      "Patterns graph: scroll to zoom in, a full-screen button (or F)",
       "Patterns as a workflow: where attackers come from, what they tried, what Bulwark did",
       "Click any card or line for the addresses behind it, with real example requests",
       "Drag, zoom and pan the canvas; Fit and Tidy up bring it back",
