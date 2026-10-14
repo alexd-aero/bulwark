@@ -7,6 +7,10 @@ set -uo pipefail
 [ -n "$NODE" ] || { echo "::warn Bulwark needs Node.js 18 or newer"; exit 1; }
 echo "::phase Setting up"
 home="$(cfg home)"; port="$(cfg port)"
+# inside Aegis × Burrow the dashboard opens only through Aegis (its login), never by a key link
+if [ "${ADDON_HOST:-}" = burrow ]; then
+  "$NODE" --input-type=module -e "import('$APP/core/config.mjs').then((m) => m.setConfig({ access: 'host' }))" && echo "::progress 15 the dashboard opens only through your Aegis login"
+fi
 mkdir -p "$home"/{feeds,asn,logs,state,run}
 echo "::progress 20 config in ${XDG_CONFIG_HOME:-$HOME/.config}/bulwark, data in $home"
 if have_user_systemd; then

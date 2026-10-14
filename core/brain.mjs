@@ -9,6 +9,12 @@
 //   bans             kept here (state/bans.json), sent to every guard at once,
 //                    and reported to the vendors that missed them
 //   waves            alerts (and strict mode while one is critical)
+//   the host's past  what the gate remembers from before Bulwark (Aegis's
+//                    ctx.history: each tunnel's clients and recent requests,
+//                    the audit log) comes into the log and the profiles, and
+//                    anyone it shows hunting is banned by the same rules
+//   warnings         waves and bans go to the host's dashboard too (Aegis's
+//                    bell), unless Settings says not to
 //
 // Never banned: private addresses, addresses you signed in from (30 days),
 // requests with your session, the allow list. This machine's own public
@@ -23,11 +29,12 @@ import { Asn } from "./asn.mjs";
 import { Logs, Series, Profiles } from "./store.mjs";
 import { Waves } from "./waves.mjs";
 import { Reporters } from "./report.mjs";
+import { classifyRequest } from "./payloads.mjs";
 import { checkIp, useLists } from "./intel.mjs";
 import { paths } from "./config.mjs";
 
 const MIN = 60e3, HOUR = 60 * MIN, DAY = 24 * HOUR;
-export const DEFAULT_SETTINGS = { auto: true, drop: true, lookups: true, report: true, abuseipdbKey: "", ntfy: "", webhook: "", keepDays: 30, strict: true };
+export const DEFAULT_SETTINGS = { auto: true, drop: true, lookups: true, report: true, abuseipdbKey: "", ntfy: "", webhook: "", keepDays: 30, strict: true, hostNotices: true };
 const atomic = (file, obj) => { writeFileSync(file + ".tmp", JSON.stringify(obj)); renameSync(file + ".tmp", file); };
 
 export class Brain {
@@ -39,7 +46,7 @@ export class Brain {
     this.offline = offline;
     this.file = join(this.P.state, "bulwark.json");
     this.state = { settings: { ...DEFAULT_SETTINGS }, bans: {}, allow: {}, trusted: {}, actions: [],
-                   stats: { banned: 0, unbanned: 0, checked: 0, since: Date.now() }, imported: false };
+                   stats: { banned: 0, unbanned: 0, checked: 0, since: Date.now() }, imported: false, history: { seen: [], last: null } };
     try {
       const s = JSON.parse(readFileSync(this.file, "utf8"));
       this.state = { ...this.state, ...s, settings: { ...DEFAULT_SETTINGS, ...s.settings }, stats: { ...this.state.stats, ...s.stats } };
@@ -93,6 +100,7 @@ export class Brain {
   }
   stop() {
     for (const x of this.timers) { clearInterval(x); clearTimeout(x); }
+    clearTimeout(this.banNoteTimer);
     this.logs.flush(); this.save(true); this.profiles.save(); this.series.save(); this.waves.save(); this.reporters.save();
   }
   save(force) {
@@ -132,7 +140,98 @@ export class Brain {
         break;
       case "ban": this.recordBan(m.ip, m.b, m.info || {}); break;
       case "trust": this.trust(m.ip, false); break;
+      case "history": try { this.importHistory(m.data || {}, m.host); } catch (err) { this.log("history:", err.message); } break;
     }
+  }
+  // ask the guards for the host's past again (Settings → "Pull from Aegis")
+  pullHistory() { if (!this.sensors.size) throw new Error("No host is connected."); this.broadcast({ t: "pull", since: 0 }); }
+
+  // ------------------------------------------------------------ the host's past
+  // data: {tunnels: [{port, host, clients: [{ip, country, agent, first, last, requests}], recent: [{t, ip, country, method, path, status, ms, bytes}]}],
+  //        audit: [{t (ISO), event, ip, host, ua, path?}]}
+  // Everything new comes into the log (src "aegis") and the profiles; whoever sent
+  // payloads is judged by the guard's rules (two payloads, or score 6), then looked up.
+  importHistory(data, host = "host") {
+    const H = this.state.history ||= { seen: [], last: null };
+    const seen = new Set(H.seen);
+    const fresh = [], per = new Map(), clientsSeen = new Set();
+    const add = (k, e) => { if (seen.has(k)) return; seen.add(k); H.seen.push(k); fresh.push(e); };
+    for (const t of data.tunnels || []) {
+      for (const r of t.recent || []) {
+        if (!r?.ip || !r.t) continue;
+        add(`r|${t.port}|${r.t}|${r.ip}|${r.method}|${r.path}`, { t: r.t, ip: normIp(r.ip), cc: r.country || "", host: t.host || "", port: t.port, main: false,
+          m: r.method || "", path: String(r.path || "").slice(0, 600), ua: "", st: r.status || 0, b: r.bytes || 0, ms: r.ms ?? null, dec: "seen", src: host });
+      }
+      for (const c of t.clients || []) {
+        if (!c?.ip) continue;
+        const ip = normIp(c.ip); clientsSeen.add(ip);
+        const p = this.profiles.get(ip);
+        if (p) { p.first = Math.min(p.first, c.first || p.first); p.hostN = Math.max(p.hostN || 0, c.requests || 0); continue; }
+        this.profiles.add({ t: c.first || Date.now(), ip, cc: c.country || "", host: t.host || "", path: "", dec: "seen", b: 0 });
+        const np = this.profiles.get(ip); np.last = c.last || np.last; np.hostN = c.requests || 0; np.n = 0; np.dec = {}; np.paths = []; if (c.agent) np.agent = c.agent;
+      }
+    }
+    for (const a of data.audit || []) {
+      const ip = normIp(a.ip || "");
+      if (!isIP(ip) || !/failed|refused|wrong|throttled|garbled/.test(a.event || "")) continue;
+      const t = Date.parse(a.t) || 0;
+      add(`a|${a.t}|${ip}|${a.event}`, { t, ip, cc: "", host: a.host || "", port: null, main: true, m: "", path: String(a.path || `(${a.event})`).slice(0, 600),
+        ua: String(a.ua || "").slice(0, 300), st: 0, b: 0, ms: null, dec: "seen", src: host, why: a.event });
+    }
+    if (H.seen.length > 12000) H.seen.splice(0, H.seen.length - 10000);
+    fresh.sort((x, y) => x.t - y.t);
+    for (const e of fresh) {
+      const sig = classifyRequest(e.path, e.ua);
+      if (sig.score) { e.sig = sig.id; e.sc = sig.score; }
+      const a = isIP(e.ip) ? this.asn.lookup(e.ip) : null;
+      if (a) { e.asn = a.asn; e.org = a.name; if (a.hosting) e.dc = true; if (!e.cc) e.cc = a.cc; }
+      this.profiles.add(e); this.logs.add(e);
+      if (sig.score && !sig.ua) {
+        const x = per.get(e.ip) || { score: 0, payloads: 0, paths: [], host: e.host, cc: e.cc };
+        x.score += sig.score; if (sig.score === 3) x.payloads++; if (x.paths.length < 3 && !x.paths.includes(e.path)) x.paths.push(e.path.slice(0, 80));
+        per.set(e.ip, x);
+      }
+    }
+    // judged as the guard would have, had it been there
+    const banned = [];
+    for (const [ip, x] of per) {
+      if (this.state.bans[ip] || this.state.allow[ip] || this.isTrusted(ip) || this.own.has(ip) || isPrivate(ip)) continue;
+      const v = this.verdicts.get(ip);
+      if (x.payloads >= 2 || (!v?.benign && x.score >= 6)) {
+        const b = this.ban(ip, `found in ${host === "aegis-burrow" ? "Aegis's" : "the host's"} history: ${x.payloads >= 2 ? `${x.payloads} payloads` : "probing"} (${x.paths.join(", ")})`,
+                           { source: "history", ttl: 30 * DAY, info: { host: x.host, country: x.cc } });
+        if (b) banned.push(ip);
+      }
+    }
+    const ips = new Set([...fresh.map((e) => e.ip), ...clientsSeen]);
+    for (const ip of ips) if (isIP(ip) && !isPrivate(ip) && !this.own.has(ip) && !this.isTrusted(ip)) this.enqueue(ip, { probe: per.has(ip) });
+    H.last = { at: Date.now(), host, rows: fresh.length, ips: ips.size, banned };
+    this.dirty = true;
+    if (fresh.length || banned.length) this.log(`history from ${host}: ${fresh.length} new lines, ${ips.size} addresses${banned.length ? `, banned ${banned.join(", ")}` : ""}`);
+    if (banned.length) this.hostNotice({ level: "warn", key: "history", link: "/__gate/bulwark/#/addresses",
+      title: `Bulwark found ${banned.length} attacker${banned.length > 1 ? "s" : ""} in Aegis's history`,
+      body: banned.slice(0, 6).map((ip) => `${ip}: ${this.state.bans[ip]?.reason || ""}`).join("\n") });
+    return H.last;
+  }
+
+  // ------------------------------------------------------------ warnings on the host's dashboard
+  hostNotice(n) {
+    if (this.settings.hostNotices === false || !this.sensors.size) return;
+    this.broadcast({ t: "notify", ...n });
+  }
+  // bans come in bursts: one notice a minute at most, the same one updated while unread
+  noteBan(ip, reason) {
+    (this.banNotes ||= []).push({ ip, reason, cc: this.profiles.get(ip)?.cc || "", org: this.profiles.get(ip)?.org || "" });
+    if (this.banNoteTimer) return;
+    this.banNoteTimer = setTimeout(() => {
+      this.banNoteTimer = null;
+      const list = this.banNotes.splice(0);
+      if (!list.length) return;
+      this.hostNotice({ level: "warn", key: "bans", link: "/__gate/bulwark/#/addresses",
+        title: list.length === 1 ? `Bulwark banned ${list[0].ip}` : `Bulwark banned ${list.length} addresses`,
+        body: list.slice(0, 6).map((b) => `${b.ip}${b.cc || b.org ? ` (${[b.cc, b.org].filter(Boolean).join(" · ")})` : ""}: ${b.reason}`).join("\n") + (list.length > 6 ? `\n…and ${list.length - 6} more` : "") });
+    }, 60e3);
+    this.banNoteTimer.unref?.();
   }
 
   // ------------------------------------------------------------ requests
@@ -228,6 +327,7 @@ export class Brain {
     this.state.stats.banned++; this.dirty = true;
     this.action(ip, "banned", b.reason, info);
     this.broadcast({ t: "ban", ip, b });
+    this.noteBan(ip, b.reason);
     this.reporters.enqueue({ ip, reason: b.reason, source: b.source, ...this.state.bans[ip], first: this.profiles.get(ip)?.first, last: Date.now() });
   }
   ban(ip, reason, { source = "manual", ttl = 0, info = {} } = {}) {
@@ -240,6 +340,7 @@ export class Brain {
     this.state.stats.banned++; this.dirty = true;
     this.action(ip, "banned", b.reason, info);
     this.log("banned", ip, "-", b.reason);
+    if (source !== "manual" && source !== "history") this.noteBan(ip, b.reason);
     this.broadcast({ t: "ban", ip, b }); this.broadcast({ t: "kick", ip });
     this.reporters.enqueue({ ip, reason: b.reason, source, ...this.state.bans[ip], first: this.profiles.get(ip)?.first, last: now });
     this.writeSnapshot();
@@ -293,6 +394,10 @@ export class Brain {
     this.log(`wave ${change}: [${a.sev}] ${a.title}`);
     for (const fn of this.alertSubs || []) { try { fn(a, change); } catch { /* closed */ } }
     this.reporters.notify(a, change).catch(() => {});
+    if (change !== "closed" && (a.sev === "warn" || a.sev === "critical")) {
+      this.hostNotice({ level: a.sev, key: `wave:${a.key}`, link: "/__gate/bulwark/#/waves", title: `Bulwark: ${a.title}`,
+        body: `${a.detail || ""}${a.members?.length ? `\n${a.members.length} addresses: ${a.members.slice(0, 6).join(", ")}${a.members.length > 6 ? "…" : ""}` : ""}` });
+    }
     // a campaign's members are reported as one (evidence: the same play from many)
     if (a.kind === "campaign" && a.sev !== "info") for (const ip of a.members) if (this.state.bans[ip]) this.reporters.enqueue({ ip, ...this.state.bans[ip], source: "campaign", reason: `${this.state.bans[ip].reason}; part of a campaign of ${a.members.length} addresses` });
   }

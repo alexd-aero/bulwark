@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Guard } from "../sensor/guard.mjs";
 import { FEEDS, parseFeed, RangeSet, lookupIn } from "../core/lists.mjs";
-import { classify } from "../core/payloads.mjs";
+import { classify, classifyRequest } from "../core/payloads.mjs";
 import { netOf } from "../core/net.mjs";
 
 const feed = (id) => FEEDS.find((f) => f.id === id);
@@ -97,12 +97,33 @@ test("this machine's own address: not trusted, not banned, payloads dropped unle
   assert.equal(g.gate("93.184.216.34", { path: "/.env", trusted: () => true }), null);
 });
 
-test("known services (benign verdict) aren't banned for probes; payloads still 404", () => {
-  const { g } = guard({ ipsum: "138.68.86.32\t1\n" });
+test("known services (benign verdict): probes and a list mark don't ban; two secret hunts do", () => {
+  const { g } = guard({ ipsum: "138.68.86.32\t1\n66.249.66.1\t1\n" });
+  g.apply({ t: "verdict", ip: "66.249.66.1", v: { benign: true, bad: false, level: "notice", why: ["Googlebot"] } });
+  for (const p of ["/wp-login.php", "/phpmyadmin/", "/x.php", "/cgi-bin/", "/owa/"]) g.gate("66.249.66.1", { path: p });
+  assert.equal(g.bans.has("66.249.66.1"), false, "a crawler asking for software that isn't here");
   g.apply({ t: "verdict", ip: "138.68.86.32", v: { benign: true, bad: false, level: "malicious", why: ["LeakIX"] } });
-  assert.equal(g.gate("138.68.86.32", { path: "/.env" }).status, 404);
-  assert.equal(g.gate("138.68.86.32", { path: "/.git/config" }).status, 404);
-  assert.equal(g.bans.has("138.68.86.32"), false);
+  assert.equal(g.gate("138.68.86.32", { path: "/.env" }).status, 404, "the first: dropped");
+  assert.equal(g.gate("138.68.86.32", { path: "/.git/config" }).status, 403, "the second: banned");
+  assert.match(g.bans.get("138.68.86.32").reason, /hunted secrets.*LeakIX/);
+});
+
+test("new patterns: phishing-kit hunters, edge exploits, cluster APIs, attack tools by User-Agent", () => {
+  const { g } = guard();
+  // 146.70.134.142's walk on 2026-10-14: a phishing-kit hunter
+  assert.equal(g.gate("146.70.134.142", { path: "/js/raif_ch.js" }).status, 404);
+  assert.equal(g.gate("146.70.134.142", { path: "/js/twint_ch.js" }).status, 403);
+  assert.equal(classify("/static/style/sys_files/index.js").id, "phish-kit");
+  assert.equal(classify("/remote/fgt_lang?lang=/../../../..//////////dev/").score, 3);
+  assert.equal(classify("/api/v1/namespaces/default/secrets").id, "infra-api");
+  assert.equal(classify("/index.php?s=/Index/\\think\\app/invokefunction").id, "rce");
+  assert.equal(classify("/phpinfo.php").id, "info-leak");
+  assert.equal(g.gate("198.51.100.7", { path: "/", ua: "sqlmap/1.8#stable" }).status, 404, "an attack tool's request never reaches the app");
+  assert.equal(g.gate("198.51.100.8", { path: "/", ua: "l9explore/1.2.2" }), null, "a mass scanner only marks");
+  for (let i = 0; i < 12; i++) g.gate("198.51.100.8", { path: "/", ua: "l9explore/1.2.2" });
+  assert.equal(g.bans.has("198.51.100.8"), false, "its name alone never adds up to a ban");
+  assert.equal(classifyRequest("/", "curl/7.81.0").score, 0, "curl is just curl");
+  for (const p of ["/assets/js/auth.js", "/css/support_parent.css", "/api/query?q=hello", "/search?query=cats", "/docs/info.md", "/js/app_main.js"]) assert.equal(classify(p).score, 0, p);
 });
 
 test("state from the app replaces the guard's, and the log line carries everything", () => {

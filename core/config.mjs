@@ -1,5 +1,5 @@
 // Where Bulwark keeps things, and how its parts find each other.
-//   ~/.config/bulwark/bulwark.json   {home, port, bind, key}: written once, read by
+//   ~/.config/bulwark/bulwark.json   {home, port, bind, key, access}: written once, read by
 //                                    the app, the sensor inside a host, the CLI
 //   <home>/feeds  lists   <home>/asn  network database   <home>/logs  every request
 //   <home>/state  bans, settings, alerts   <home>/run/sensor.sock  sensor <-> app
@@ -20,13 +20,22 @@ export function loadConfig({ create = false } = {}) {
     port: Number(process.env.BULWARK_PORT || c.port || DEFAULT_PORT),
     bind: process.env.BULWARK_BIND || c.bind || "127.0.0.1",
     key: c.key || null,
+    // "key": the key opens it (a link, then a cookie); "host": only a host's header does
+    access: c.access === "host" ? "host" : "key",
   };
   if (create && (!c.key || !existsSync(CONFIG_FILE))) {
     out.key = out.key || randomBytes(24).toString("base64url");
     mkdirSync(dirname(CONFIG_FILE), { recursive: true });
-    writeFileSync(CONFIG_FILE, JSON.stringify({ home: out.home, port: out.port, bind: out.bind, key: out.key }, null, 2) + "\n", { mode: 0o600 });
+    writeFileSync(CONFIG_FILE, JSON.stringify({ home: out.home, port: out.port, bind: out.bind, key: out.key, access: out.access }, null, 2) + "\n", { mode: 0o600 });
   }
   return out;
+}
+// Change one thing in the config file (the installer: access "host" inside Aegis).
+export function setConfig(patch) {
+  let c = {};
+  try { c = JSON.parse(readFileSync(CONFIG_FILE, "utf8")); } catch { /* none yet */ }
+  mkdirSync(dirname(CONFIG_FILE), { recursive: true });
+  writeFileSync(CONFIG_FILE, JSON.stringify({ ...c, ...patch }, null, 2) + "\n", { mode: 0o600 });
 }
 // A Unix socket's path must stay under ~107 bytes. A deep home gets a short one
 // under the user's home (hosts may run with a private /tmp and a read-only /run).

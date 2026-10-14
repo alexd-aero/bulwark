@@ -56,7 +56,7 @@ export class Logs {
   static match(e, f, q) {
     if (f.ip && e.ip !== f.ip) return false;
     if (f.host && e.host !== f.host) return false;
-    if (f.dec && (f.dec === "bad" ? e.dec === "pass" : e.dec !== f.dec)) return false;
+    if (f.dec && (f.dec === "bad" ? e.dec === "pass" || (e.dec === "seen" && !e.sig) : e.dec !== f.dec)) return false;
     if (f.sig && (f.sig === "any" ? !e.sig : e.sig !== f.sig)) return false;
     if (f.cc && e.cc !== f.cc) return false;
     if (f.st && String(e.st)[0] !== String(f.st)[0]) return false;

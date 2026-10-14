@@ -2,7 +2,11 @@
 // Bulwark: the app. Its own process (bulwark.service), its own dashboard.
 //
 //   http://127.0.0.1:4370/     the dashboard (key: ?k=<key> once, then a cookie;
-//                              hosts send x-bulwark-key, e.g. Aegis's /__gate/bulwark)
+//                              hosts send x-bulwark-key, e.g. Aegis's /__gate/bulwark).
+//                              With access "host" (installed in a host that has a
+//                              login: Aegis × Burrow) only the host's header opens
+//                              it: no link or cookie does, so the dashboard is
+//                              behind that login (post-quantum, in Aegis's case)
 //   /api/...                   what the dashboard reads and does (below)
 //   <home>/run/sensor.sock     the guards inside hosts (sensor/burrow.mjs) connect here
 //
@@ -29,7 +33,7 @@ const MIN = 60e3, HOUR = 60 * MIN, DAY = 24 * HOUR;
 const SPANS = { "15m": 15 * MIN, "1h": HOUR, "6h": 6 * HOUR, "24h": DAY, "7d": 7 * DAY, "30d": 30 * DAY, "90d": 90 * DAY };
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 
-export function startApp({ home, port, bind = "127.0.0.1", key, offline = false, remote, fetchImpl, quiet = false } = {}) {
+export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", offline = false, remote, fetchImpl, quiet = false } = {}) {
   const say = quiet ? () => {} : log;
   const brain = new Brain({ home, log: say, offline, remote, fetchImpl }).start();
   const keyHash = createHash("sha256").update(String(key)).digest();
@@ -206,6 +210,8 @@ export function startApp({ home, port, bind = "127.0.0.1", key, offline = false,
     if (path === "/lists" && m === "GET") return send(res, 200, { adds: brain.listAdds, lists: brain.feeds.view(), total: brain.feeds.total(), asn: brain.asn.view(), signatures: SIGNATURES.map(({ id, name, score }) => ({ id, name, score })) });
     if (path === "/lists/refresh" && m === "POST") { await brain.feeds.refreshDue(true); return send(res, 200, { lists: brain.feeds.view(), total: brain.feeds.total() }); }
     if (path === "/vendors" && m === "GET") return send(res, 200, { ...brain.reporters.view(), abuseipdb: !!brain.settings.abuseipdbKey, report: brain.settings.report });
+    if (path === "/history" && m === "GET") return send(res, 200, { last: brain.state.history?.last || null, hosts: [...brain.sensors].map((x) => x.info?.host).filter(Boolean) });
+    if (path === "/history/pull" && m === "POST") { brain.pullHistory(); return send(res, 200, { ok: true }); }
     if (path === "/settings") {
       if (m === "PUT") {
         const b = await readJson(req);
@@ -229,12 +235,14 @@ export function startApp({ home, port, bind = "127.0.0.1", key, offline = false,
     let path = url.pathname;
     try {
       // the key: a header from a host, a cookie, or ?k= once (then the cookie)
-      const k = req.headers["x-bulwark-key"] || url.searchParams.get("k") || cookie(req);      // a fresh ?k= link wins over an old cookie
+      const hostOnly = access === "host";
+      const k = req.headers["x-bulwark-key"] || (hostOnly ? null : url.searchParams.get("k") || cookie(req));      // a fresh ?k= link wins over an old cookie
       if (!okKey(k)) {
         if (path === "/api/status") return send(res, 200, { ok: true, name: "Bulwark", version: VERSION });
-        return send(res, 401, path.startsWith("/api/") ? { error: "key required" } : "<!doctype html><title>Bulwark</title><body style='font:15px system-ui;background:#0b0c0e;color:#ddd;display:grid;place-items:center;height:100vh'><p>Open Bulwark from its host (Burrow or Selkies Forge), or with <code>?k=&lt;key&gt;</code> from <code>bulwark key</code>.</p>", path.startsWith("/api/") ? "application/json" : "text/html; charset=utf-8");
+        const how = hostOnly ? "Open Bulwark from your Aegis × Burrow dashboard (it's behind that login)." : "Open Bulwark from its host (Burrow or Selkies Forge), or with <code>?k=&lt;key&gt;</code> from <code>bulwark key</code>.";
+        return send(res, 401, path.startsWith("/api/") ? { error: hostOnly ? "open it through your host's dashboard" : "key required" } : `<!doctype html><title>Bulwark</title><body style='font:15px system-ui;background:#0b0c0e;color:#ddd;display:grid;place-items:center;height:100vh'><p>${how}</p>`, path.startsWith("/api/") ? "application/json" : "text/html; charset=utf-8");
       }
-      if (url.searchParams.get("k") && !req.headers["x-bulwark-key"]) {
+      if (!hostOnly && url.searchParams.get("k") && !req.headers["x-bulwark-key"]) {
         res.setHeader("Set-Cookie", `bulwark_k=${encodeURIComponent(k)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000`);
         url.searchParams.delete("k");
         res.writeHead(302, { Location: url.pathname + (url.search || "") }); return res.end();
@@ -256,6 +264,6 @@ export function startApp({ home, port, bind = "127.0.0.1", key, offline = false,
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const cfg = loadConfig({ create: true });
-  const app = startApp({ home: cfg.home, port: cfg.port, bind: cfg.bind, key: cfg.key, offline: process.env.BULWARK_OFFLINE === "1" });
+  const app = startApp({ home: cfg.home, port: cfg.port, bind: cfg.bind, key: cfg.key, access: cfg.access, offline: process.env.BULWARK_OFFLINE === "1" });
   for (const sig of ["SIGTERM", "SIGINT"]) process.on(sig, () => { app.close(); process.exit(0); });
 }

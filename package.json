@@ -1,6 +1,6 @@
 {
   "name": "bulwark",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "description": "Bulwark: a shield for self-hosted gateways. Blocklists, payload detection and bans on every request in microseconds; full request logs, wave warnings, pattern graphs and vendor reporting in its own dashboard.",
   "license": "MIT",
   "type": "module",

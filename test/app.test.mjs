@@ -145,3 +145,52 @@ test("settings: the key is never shown; the guards get the switches", async () =
   await sleep(50);
   assert.ok(got.some((m) => m.t === "settings" && m.settings.drop === false));
 });
+
+test("the host's past: Aegis's history comes in once, attackers in it are banned, the dashboard is told", async () => {
+  const t0 = Date.now() - 6 * 3600e3;
+  const data = {
+    tunnels: [{ port: 27715, host: "27715.tunnel.example", clients: [{ ip: "198.51.100.40", country: "DE", agent: "Other", first: t0, last: t0 + 60e3, requests: 31 }],
+      recent: [{ t: t0, ip: "198.51.100.40", country: "DE", method: "GET", path: "/.env", status: 200, ms: 2, bytes: 90 },
+               { t: t0 + 1000, ip: "198.51.100.40", country: "DE", method: "GET", path: "/.git/config", status: 200, ms: 2, bytes: 90 },
+               { t: t0 + 2000, ip: "198.51.100.41", country: "US", method: "GET", path: "/", status: 200, ms: 2, bytes: 900 }] }],
+    audit: [{ t: new Date(t0 + 3000).toISOString(), event: "sign-in failed", ip: "198.51.100.42", host: "aegis.example", ua: "curl/8" }],
+  };
+  got.length = 0;
+  tell({ t: "history", host: "aegis-burrow", data });
+  await sleep(200);
+  const b = app.brain.state.bans["198.51.100.40"];
+  assert.ok(b, "two payloads in the past: banned now");
+  assert.equal(b.source, "history");
+  assert.match(b.reason, /Aegis's history: 2 payloads/);
+  assert.equal(app.brain.state.bans["198.51.100.41"], undefined, "a plain visit: nothing");
+  const rows = (await get("/api/logs?ip=198.51.100.40")).logs;
+  assert.equal(rows.length, 2); assert.equal(rows[0].dec, "seen"); assert.equal(rows[0].src, "aegis-burrow");
+  assert.ok(app.brain.profiles.get("198.51.100.42"), "a failed sign-in's address is known");
+  const n = got.find((m) => m.t === "notify" && m.key === "history");
+  assert.ok(n, "the dashboard hears of it"); assert.equal(n.level, "warn"); assert.match(n.title, /found 1 attacker/);
+  // the same history again: nothing new
+  tell({ t: "history", host: "aegis-burrow", data });
+  await sleep(150);
+  assert.equal((await get("/api/logs?ip=198.51.100.40")).logs.length, 2, "not twice");
+  assert.equal((await get("/api/history")).last.rows, 0);
+  // the setting turns the dashboard warnings off
+  await fetch(base() + "/api/settings", { method: "PUT", headers: { "x-bulwark-key": "k", "Content-Type": "application/json" }, body: JSON.stringify({ hostNotices: false }) });
+  got.length = 0; app.brain.hostNotice({ level: "warn", title: "x" });
+  assert.equal(got.filter((m) => m.t === "notify").length, 0);
+  await fetch(base() + "/api/settings", { method: "PUT", headers: { "x-bulwark-key": "k", "Content-Type": "application/json" }, body: JSON.stringify({ hostNotices: true }) });
+  // "Pull now" asks the guards
+  got.length = 0; await post("/api/history/pull"); await sleep(50);
+  assert.ok(got.some((m) => m.t === "pull"));
+});
+
+test("access \"host\": only the host's header opens it, never a link or a cookie", async () => {
+  const h2 = mkdtempSync(join(tmpdir(), "bw-home2-"));
+  const a2 = startApp({ home: h2, port: 0, key: "k2", access: "host", offline: true, quiet: true });
+  try {
+    await new Promise((r) => (a2.server.listening ? r() : a2.server.once("listening", r)));
+    const b2 = `http://127.0.0.1:${a2.server.address().port}`;
+    assert.equal((await fetch(b2 + "/?k=k2", { redirect: "manual" })).status, 401, "a key link doesn't");
+    assert.equal((await fetch(b2 + "/api/overview", { headers: { cookie: "bulwark_k=k2" } })).status, 401, "nor a cookie");
+    assert.equal((await fetch(b2 + "/api/settings", { headers: { "x-bulwark-key": "k2" } })).status, 200, "the host's header does");
+  } finally { a2.close(); }
+});

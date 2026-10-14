@@ -7,7 +7,12 @@
 //                            batched to the app every 250 ms (never awaited)
 //   signedIn(ip)             a sign-in: that address is yours
 //   peek(ip) / lookup(ip)    for the gate's own pages and IP checks
-//   mount                    the dashboard under the gate's login (/__gate/bulwark)
+//   mount                    the dashboard under the gate's login (/__gate/bulwark),
+//                            and a tile on the gate's home page
+//   ctx.history()            what the gate remembers from before (each tunnel's
+//                            clients and recent requests, the audit log): sent
+//                            to the app when it connects, and when you ask
+//   ctx.notify()             the app's warnings, on the gate's dashboard (the bell)
 //   handle(...)              /__gate/api/x/bulwark/… -> the app's API
 //
 // The app (server.mjs, its own service) does everything else, and sends the
@@ -48,6 +53,7 @@ function connectApp() {
            stats: guardObj.stats });
     for (const m of pending.splice(0)) send(m);
     flush();
+    sendHistory();
   });
   s.on("data", (d) => {
     buf += d.toString("utf8");
@@ -57,6 +63,8 @@ function connectApp() {
       let m; try { m = JSON.parse(line); } catch { continue; }
       if (m.t === "kick") { try { ctx?.kick?.(m.ip); } catch { /* best effort */ } continue; }
       if (m.t === "feeds") { loadLists(); continue; }
+      if (m.t === "pull") { sendHistory(m.since || 0); continue; }
+      if (m.t === "notify") { try { ctx?.notify?.({ level: m.level, title: m.title, body: m.body, link: m.link, key: m.key }); } catch (e) { log("notify:", e.message); } continue; }
       guardObj.apply(m);
     }
   });
@@ -67,6 +75,13 @@ function connectApp() {
   };
   s.on("error", () => {});
   s.on("close", again);
+}
+
+// what the gate remembers (older hosts don't have it: nothing to send)
+function sendHistory(since = 0) {
+  if (typeof ctx?.history !== "function") return;
+  try { send({ t: "history", host: "aegis-burrow", at: Date.now(), data: ctx.history({ since }) }); }
+  catch (e) { log("history:", e.message); }
 }
 
 // the lists, parsed in a worker thread and swapped in whole
@@ -134,7 +149,8 @@ export function peek(ip) {
 export function lookup(ip) { return guardObj ? lookupIn(guardObj.lists, ip) : []; }
 const appUrl = () => `http://${!cfg.bind || cfg.bind === "0.0.0.0" || cfg.bind === "::" ? "127.0.0.1" : cfg.bind}:${cfg.port}`;
 export function mount() {
-  return cfg?.key ? { prefix: "/__gate/bulwark", upstream: appUrl(), headers: { "x-bulwark-key": cfg.key }, name: "Bulwark" } : null;
+  return cfg?.key ? { prefix: "/__gate/bulwark", upstream: appUrl(), headers: { "x-bulwark-key": cfg.key, "x-bulwark-host": "aegis-burrow" }, name: "Bulwark",
+                      tile: { text: "Attacks, bans and every request, live." } } : null;
 }
 
 // /__gate/api/x/bulwark/<path>: the app's API, for the Burrow page's panel

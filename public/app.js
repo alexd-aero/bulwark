@@ -11,6 +11,7 @@ const clock = (t) => new Date(t).toLocaleTimeString([], { hour: "2-digit", minut
 const fmtB = (b) => { if (!b) return "0 B"; const u = ["B", "KB", "MB", "GB", "TB"]; const i = Math.min(4, Math.floor(Math.log(b) / Math.log(1024))); return (b / 1024 ** i).toFixed(i ? 1 : 0) + " " + u[i]; };
 const flag = (cc) => /^[A-Z]{2}$/.test(cc || "") ? `<span class="flag" title="${cc}">${String.fromCodePoint(...[...cc].map((c) => 0x1f1a5 + c.charCodeAt(0)))}</span>` : "";
 const ICONS = {
+  back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>',
   grid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>',
   list: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></svg>',
   wave: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 12c2.5-5 5-5 7.5 0s5 5 7.5 0 3.5-3 5-2"/><path d="M2 18c2.5-3 5-3 7.5 0s5 3 7.5 0 3.5-2 5-1" opacity=".5"/></svg>',
@@ -22,7 +23,7 @@ const ICONS = {
 };
 for (const i of document.querySelectorAll("[data-i]")) i.innerHTML = ICONS[i.dataset.i] || "";
 
-const DEC = { pass: ["pass", "through"], drop: ["drop", "payload dropped"], block: ["block", "blocked"], ban: ["ban", "banned"] };
+const DEC = { pass: ["pass", "through"], drop: ["drop", "payload dropped"], block: ["block", "blocked"], ban: ["ban", "banned"], seen: ["seen", "from the host's history"] };
 const SEVP = { critical: "crit", warn: "warn", info: "info" };
 const SPAN_KEYS = ["15m", "1h", "6h", "24h", "7d", "30d", "90d"];
 const S = { view: "overview", span: localStore("span") || "24h", gspan: "24h", ov: null, logs: [], logF: { dec: "", sig: "", q: "", ip: "", host: "" }, paused: false,
@@ -109,6 +110,8 @@ async function loadLog(more) {
   if (more && S.logs.length) f.before = S.logs[S.logs.length - 1].id;
   const r = await api("logs?" + new URLSearchParams({ ...f, limit: 300 }));
   S.logs = more ? [...S.logs, ...r.logs] : r.logs;
+  S.logEnd = r.logs.length < 300;                // nothing older to fetch
+  return r.logs;
 }
 const logMatches = (e) => { const f = S.logF; if (f.dec && (f.dec === "bad" ? e.dec === "pass" : e.dec !== f.dec)) return false; if (f.sig && (f.sig === "any" ? !e.sig : e.sig !== f.sig)) return false; if (f.ip && e.ip !== f.ip) return false; if (f.host && e.host !== f.host) return false; if (f.q && !`${e.ip} ${e.host} ${e.path} ${e.ua} ${e.why || ""} ${e.org || ""}`.toLowerCase().includes(f.q.toLowerCase())) return false; return true; };
 function logRow(e) {
@@ -124,13 +127,15 @@ function logDetail(e) {
     ["Host", `${e.host || "–"}${e.port ? ` (tunnel ${e.port})` : e.main ? " (dashboard)" : ""}`], ["Request", `${e.m} ${e.path}`], ["Status", `${e.st || "–"} · ${fmtB(e.b || 0)}${e.ms != null ? ` · ${e.ms} ms` : ""}${e.ws ? " · WebSocket" : ""}`],
     ["Decision", `${DEC[e.dec]?.[1] || e.dec}${e.why ? ` · ${e.why}` : ""}`], ["Pattern", e.sig ? `${e.sig} (${e.sc === 3 ? "payload" : "probe"})` : "–"], ["Lists", (e.lists || []).join(", ") || "–"],
     ["User agent", e.ua || "–"], ["Referer", e.ref || "–"], ["Language", e.lang || "–"], ["Came via", `${e.via || "–"}${e.ray ? ` · ray ${e.ray}` : ""}${e.proto ? ` · HTTP/${e.proto}` : ""}`],
-    ["Signed in", e.auth === undefined ? "not checked" : e.auth ? "yes" : "no"], ["Log id", `#${e.id}`]];
+    ["Signed in", e.auth === undefined ? "not checked" : e.auth ? "yes" : "no"], ["Log id", `#${e.id}${e.src ? ` · from ${e.src === "aegis-burrow" ? "Aegis's" : "the host's"} history` : ""}`]];
   return `<dl class="kv">${kv.map(([k, v]) => `<dt>${k}</dt><dd class="${k === "Request" || k === "User agent" ? "mono" : ""}">${h(v)}</dd>`).join("")}</dl>
     <div class="row" style="margin-top:10px"><button class="btn sm" data-act="ip" data-ip="${h(e.ip)}">This address</button><button class="btn sm ghost" data-act="logf" data-k="ip" data-v="${h(e.ip)}">Only this address</button>${e.host ? `<button class="btn sm ghost" data-act="logf" data-k="host" data-v="${h(e.host)}">Only ${h(e.host)}</button>` : ""}</div>`;
 }
 function renderLog() {
   const f = S.logF;
   const keep = document.activeElement?.id === "lq" ? $("#lq").selectionStart : null;
+  // where the reader is: kept across the repaint (new lines on top don't push it around)
+  const sc = $("#logScroll"), top = sc ? sc.scrollTop : 0, tall = sc ? sc.scrollHeight : 0, winY = window.scrollY;
   app.innerHTML = `
     <div class="head"><div><h1>Live log</h1><p>Every request, in full: who, where from, what for, what Bulwark did and why. Click a row for everything; newest on top.</p></div></div>
     <div class="logbar">
@@ -140,11 +145,27 @@ function renderLog() {
       ${f.ip ? `<span class="pill">ip ${h(f.ip)} <a href="#" data-act="logf" data-k="ip" data-v="">✕</a></span>` : ""}${f.host ? `<span class="pill">host ${h(f.host)} <a href="#" data-act="logf" data-k="host" data-v="">✕</a></span>` : ""}
       <button class="btn sm" data-act="pause">${S.paused ? "▶ Resume" : "❚❚ Pause"}</button>
     </div>
-    <section class="card" style="padding:6px 8px">${S.logs.length ? `<div class="scroll" style="max-height:calc(100vh - 230px)"><table class="logtable"><thead><tr><th>Time</th><th></th><th>Address</th><th>Method</th><th>Path</th><th>Status</th><th>Took</th><th>Pattern</th><th>Network</th></tr></thead>
-      <tbody>${S.logs.slice(0, 600).map(logRow).join("")}</tbody></table></div>
-      <div class="row" style="justify-content:center;padding:10px"><button class="btn sm" data-act="logmore">Load older</button></div>` : '<p class="empty">Nothing matches yet.</p>'}</section>`;
+    <section class="card" style="padding:6px 8px">${S.logs.length ? `<div class="scroll" id="logScroll" style="max-height:calc(100vh - 230px)"><table class="logtable"><thead><tr><th>Time</th><th></th><th>Address</th><th>Method</th><th>Path</th><th>Status</th><th>Took</th><th>Pattern</th><th>Network</th></tr></thead>
+      <tbody id="logBody">${S.logs.map(logRow).join("")}</tbody></table>
+      <div class="row" id="logMore" style="justify-content:center;padding:10px">${logMoreBtn()}</div></div>` : '<p class="empty">Nothing matches yet.</p>'}</section>`;
   if (keep !== null) { const i = $("#lq"); i.focus(); i.setSelectionRange(keep, keep); }
+  const sc2 = $("#logScroll");
+  if (sc2 && top > 0) sc2.scrollTop = top + (sc2.scrollHeight - tall);       // lines that arrived on top push the view down by as much
+  if (winY) window.scrollTo(0, winY);
   S.newIds.clear();
+}
+const logMoreBtn = () => S.logEnd ? `<span class="faint small">That's everything${S.logF.q || S.logF.ip || S.logF.dec || S.logF.sig || S.logF.host ? " that matches" : " kept"} (${fmtN(S.logs.length)} lines).</span>`
+  : `<button class="btn sm" data-act="logmore">Load older</button> <span class="faint small">${fmtN(S.logs.length)} shown</span>`;
+// older lines go under the ones on screen: nothing is repainted, the view stays where it is
+async function logMore(btn) {
+  btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Loading…';
+  const before = S.logs.length;
+  const got = await loadLog(true);
+  const body = $("#logBody");
+  if (!body) return renderLog();
+  body.insertAdjacentHTML("beforeend", S.logs.slice(before).map(logRow).join(""));
+  $("#logMore").innerHTML = logMoreBtn();
+  if (!got.length) toast("Nothing older");
 }
 
 // ------------------------------------------------------------------ waves
@@ -183,9 +204,35 @@ async function renderPatterns() {
       <div class="spacer"></div>${seg("gspan", S.gspan, ["1h", "6h", "24h", "7d", "30d"])}</div>
     <div class="graphwrap" id="gw"><div class="graph-hud"><button class="btn sm" data-act="gzoom" data-v="1.25">+</button><button class="btn sm" data-act="gzoom" data-v="0.8">−</button><button class="btn sm" data-act="gfit">Fit</button></div>
       <div class="graph-legend"><span><i style="background:#9aa3ae"></i>address</span><span><i style="background:#e040fb"></i>banned</span><span><i style="background:#ff5a52"></i>payload pattern</span><span><i style="background:#f2b53c"></i>probe pattern</span><span><i style="background:#46c2ff;border-radius:2px"></i>network</span><span><i style="background:#a78bfa;border-radius:2px"></i>hosting network</span><span><i style="background:#ff6a3d"></i>campaign</span></div></div>`;
-  charts.graph = new Graph($("#gw"), { onPick: (n) => { if (n.kind === "ip") openIp(n.label); else if (n.kind === "sig") { S.logF = { ...S.logF, sig: n.id.slice(4) }; location.hash = "#/log"; } else if (n.kind === "wave") location.hash = "#/waves"; } });
-  charts.graph.set(await api(`graph?span=${S.gspan}`));
+  charts.graph = new Graph($("#gw"), { onPick: (n) => { if (n.kind === "ip") openIp(n.label); else openPop(n); } });
+  S.gdata = await api(`graph?span=${S.gspan}`);
+  charts.graph.set(S.gdata);
 }
+// A pattern, a network or a campaign, clicked: who's behind it, right here.
+function openPop(n) {
+  const g = S.gdata || { nodes: [], edges: [] }, byId = new Map(g.nodes.map((x) => [x.id, x]));
+  const w = new Map();
+  for (const e of g.edges) {
+    const other = e.a === n.id ? e.b : e.b === n.id ? e.a : null;
+    if (other?.startsWith("ip:")) w.set(other, (w.get(other) || 0) + (e.w || 1));
+  }
+  const ips = [...w].map(([id, k]) => ({ ...byId.get(id), k })).filter((x) => x.label).sort((a, b) => b.k - a.k || b.n - a.n);
+  const banned = ips.filter((x) => x.banned).length;
+  const kind = { sig: n.score === 3 ? "payload pattern" : "probe pattern", as: n.dc ? "hosting network" : "network", wave: "campaign" }[n.kind] || n.kind;
+  const logBtn = n.kind === "sig" ? `<button class="btn sm ghost" data-act="poplog" data-k="sig" data-v="${h(n.id.slice(4))}">Show its requests in the live log</button>` : "";
+  const pop = $("#pop");
+  pop.innerHTML = `<div class="pop-card" role="dialog" aria-modal="true" aria-label="${h(n.label)}">
+      <div class="row"><div><div class="faint small">${h(kind)} · ${S.gspan}</div><h2>${h(n.label)}</h2></div><span class="spacer"></span><button class="btn sm ghost" data-act="popclose" aria-label="Close">✕</button></div>
+      <p class="muted small">${fmtN(ips.length)} address${ips.length === 1 ? "" : "es"}${banned ? ` · <b class="st4">${fmtN(banned)} banned</b>` : ""}${n.kind === "sig" ? ` · ${fmtN(n.w)} request${n.w === 1 ? "" : "s"}` : ""}. Click one for everything about it.</p>
+      <div class="scroll pop-list"><table><thead><tr><th>Address</th><th>Network</th><th>${n.kind === "sig" ? "Tries" : "Requests"}</th><th></th></tr></thead><tbody>
+        ${ips.map((x) => `<tr class="click" data-act="popip" data-ip="${h(x.label)}"><td>${ipBtn(x.label, x.cc)}</td><td class="why">${h(x.org || "–")}${x.dc ? ' <span class="pill dc">hosting</span>' : ""}</td>
+          <td class="mono">${fmtN(n.kind === "sig" ? x.k : x.n)}</td><td>${x.banned ? '<span class="pill ban">banned</span>' : ""}</td></tr>`).join("") || '<tr><td colspan="4" class="empty">Nobody in this window.</td></tr>'}
+      </tbody></table></div>
+      <div class="row end">${logBtn}<button class="btn sm" data-act="popclose">Close</button></div></div>`;
+  pop.hidden = false;
+  requestAnimationFrame(() => pop.classList.add("open"));
+}
+function closePop() { const p = $("#pop"); if (!p || p.hidden) return; p.classList.remove("open"); p.hidden = true; }
 
 // ------------------------------------------------------------------ blocklist
 async function loadBl() { S.bl = await api("blocklist"); S.blAt = S.bl.now; }
@@ -263,7 +310,8 @@ async function renderVendors() {
 
 // ------------------------------------------------------------------ settings
 async function renderSettings() {
-  const s = await api("settings");
+  const [s, hist] = await Promise.all([api("settings"), api("history").catch(() => null)]);
+  const hl = hist?.last;
   const sw = (k, title, sub) => `<div class="switchrow"><div class="grow"><b>${title}</b><span class="muted small">${sub}</span></div><span class="switch"><input type="checkbox" data-act="setting" data-k="${k}" ${s[k] ? "checked" : ""}><i></i></span></div>`;
   app.innerHTML = `
     <div class="head"><div><h1>Settings</h1><p>Bulwark is on by default and stays out of the way: the guard in each host decides in microseconds; nothing here slows a request.</p></div></div>
@@ -278,6 +326,10 @@ async function renderSettings() {
         <label class="field"><span>Webhook (JSON POST for every wave)</span><input class="input mono" id="sHook" value="${h(s.webhook)}" placeholder="https://…"></label>
         <label class="field"><span>Keep the full request log for (days)</span><input class="input mono" id="sKeep" type="number" min="1" max="365" value="${s.keepDays}" style="width:120px"></label>
         <button class="btn primary" data-act="savealerts">Save</button></section>
+      <section class="card"><h3>Your host</h3>
+        ${sw("hostNotices", "Warnings on your Aegis dashboard", "Waves and bans show up under the bell on Aegis × Burrow's dashboard (a critical wave as a banner too). One notice a minute at most for bans.")}
+        <div class="switchrow"><div class="grow"><b>What the host remembers</b><span class="muted small">Every tunnel's clients and recent requests and the sign-in log, from before Bulwark was there: pulled in when Bulwark connects. Attackers in it are banned by the same rules.${hl ? `<br>Last: ${ago(hl.at)} · ${fmtN(hl.rows)} new lines · ${fmtN(hl.ips)} addresses${hl.banned?.length ? ` · banned ${hl.banned.map(h).join(", ")}` : ""}` : "<br>Not pulled yet."}</span></div>
+          <button class="btn sm" data-act="pullhistory">Pull now</button></div></section>
     </div>`;
 }
 
@@ -337,7 +389,9 @@ async function show(view) {
   try { if (load) { if (S.view !== "overview" || !S.ov) app.innerHTML = '<p class="muted"><span class="spin"></span> Loading…</p>'; await load(); } await render(); }
   catch (e) { app.innerHTML = `<div class="card"><b class="st5">Couldn't load this.</b> <span class="muted">${h(e.message)}</span></div>`; }
 }
-function route() { show((location.hash.replace(/^#\/?/, "") || "overview").split("?")[0]); }
+// the way back to the host's dashboard, when Bulwark is opened through one (Aegis: /__gate/bulwark/)
+if (location.pathname.startsWith("/__gate/")) { const b = $("#backHost"); if (b) b.hidden = false; }
+function route() { closePop(); show((location.hash.replace(/^#\/?/, "") || "overview").split("?")[0]); }
 window.addEventListener("hashchange", route);
 
 // refresh what's on screen (not the log: that one is live)
@@ -359,7 +413,7 @@ function live() {
     const e = JSON.parse(m.data);
     if (S.view !== "log" || S.paused || !logMatches(e)) return;
     S.logs.unshift(e); S.newIds.add(e.id);
-    if (S.logs.length > 2000) S.logs.length = 2000;
+    if (S.logs.length > 6000) S.logs.length = 6000;
     if (!pending) { pending = true; requestAnimationFrame(() => { pending = false; if (S.view === "log" && document.activeElement?.tagName !== "SELECT") renderLog(); }); }
   });
   es.addEventListener("alert", (m) => {
@@ -372,7 +426,11 @@ function live() {
 // ------------------------------------------------------------------ events
 document.addEventListener("click", async (e) => {
   const el = e.target.closest("[data-act]");
-  if (!el) { if (S.ip && !e.target.closest("#drawer")) closeDrawer(); return; }
+  if (!el) {
+    if (S.ip && !e.target.closest("#drawer")) closeDrawer();
+    else if (e.target.id === "pop") closePop();
+    return;
+  }
   const act = el.dataset.act, ip = el.dataset.ip;
   if (el.tagName === "A") e.preventDefault();
   try {
@@ -384,7 +442,11 @@ document.addEventListener("click", async (e) => {
     else if (act === "closedrawer") closeDrawer();
     else if (act === "logrow") { if (e.target.closest("a")) return; const id = Number(el.dataset.id); S.open = S.open === id ? null : id; renderLog(); }
     else if (act === "logf") { S.logF[el.dataset.k] = el.dataset.v; closeDrawer(); if (location.hash !== "#/log") location.hash = "#/log"; else { await loadLog(); renderLog(); } }
-    else if (act === "logmore") { await loadLog(true); renderLog(); }
+    else if (act === "logmore") await logMore(el);
+    else if (act === "popclose") closePop();
+    else if (act === "popip") { e.stopPropagation(); openIp(ip); }
+    else if (act === "poplog") { const k = el.dataset.k, v = el.dataset.v; closePop(); S.logF = { ...S.logF, [k]: v }; location.hash = "#/log"; }
+    else if (act === "pullhistory") { el.disabled = true; el.innerHTML = '<span class="spin"></span> Asking…'; await post("history/pull"); setTimeout(async () => { S.hist = await api("history"); renderSettings(); toast("Pulled"); }, 2500); }
     else if (act === "pause") { S.paused = !S.paused; if (!S.paused) await loadLog(); renderLog(); }
     else if (act === "dismiss") { S.alerts = { ...S.alerts, ...(await post("alerts/close", { id: el.dataset.id })) }; renderWaves(); }
     else if (act === "ban") { await post(`ip/${ip}/ban`, {}); toast(`${ip} banned everywhere`); refreshAfter(ip); }
@@ -416,7 +478,7 @@ document.addEventListener("input", (e) => {
   clearTimeout(qTimer); qTimer = setTimeout(async () => { S.logF.q = e.target.value.trim(); await loadLog(); renderLog(); }, 300);
 });
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && S.ip) closeDrawer();
+  if (e.key === "Escape") { if (S.ip) closeDrawer(); else closePop(); }
   if (e.key === "Enter" && e.target.id === "banIp") $('[data-act="banit"]').click();
   if (e.key === "Enter" && e.target.id === "allowIp") $('[data-act="allowit"]').click();
 });

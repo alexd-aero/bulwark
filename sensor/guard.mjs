@@ -7,14 +7,21 @@
 //   a strong blocklist         banned on sight (the lists, parsed off the main thread)
 //   payloads                   dropped (404); two of them, or one from an
 //                              address with any mark against it, and it's banned;
-//                              during a wave ("strict"), the first one bans
+//                              during a wave ("strict"), the first one bans. The
+//                              path says what a request is after, and so does a
+//                              User-Agent that names an attack tool (sqlmap…)
+//   known services             (GreyNoise "benign": crawlers, research scanners)
+//                              aren't banned for probes or a list mark; but two
+//                              secret-hunting payloads (.env, .git…) ban even
+//                              them: an index of leaked secrets (LeakIX) is no
+//                              friend of yours
 //
 // Everything slow (lookups, waves, reports, the logs) happens in the app; the
 // guard tells it what it saw and did.
 
 import { isIP, isPrivate, normIp } from "../core/net.mjs";
 import { lookupIn, RangeSet } from "../core/lists.mjs";
-import { classify } from "../core/payloads.mjs";
+import { classifyRequest } from "../core/payloads.mjs";
 
 const HOUR = 3600e3, DAY = 24 * HOUR;
 
@@ -89,7 +96,7 @@ export class Guard {
     const bw = (info._bw = { dec: "pass" });
     if (!isIP(ip) || isPrivate(ip)) { bw.local = true; return null; }
     if (this.allow.has(ip)) { bw.allowed = true; return null; }
-    const sig = classify(info.path);
+    const sig = classifyRequest(info.path, info.ua);
     if (sig.score) { bw.sig = sig.id; bw.sc = sig.score; }
     let tr = null;
     const trusted = () => {
@@ -122,13 +129,18 @@ export class Guard {
     if (strong.length && !trusted()) return this.ban(ip, `on ${strong.map((l) => l.name).join(", ")}`, "list", 7 * DAY, info, bw);
     if (!sig.score) return null;
     if (trusted()) return null;
-    const sc = this.scores.get(ip) || { score: 0, probes: 0, paths: [], last: now };
-    if (now - sc.last > DAY) { sc.score = 0; sc.probes = 0; sc.paths = []; }
+    if (sig.ua && sig.score < 3) return null;            // a scanner's name only labels the request: it never adds up to a ban
+    const sc = this.scores.get(ip) || { score: 0, probes: 0, payloads: 0, paths: [], last: now };
+    if (now - sc.last > DAY) { sc.score = 0; sc.probes = 0; sc.payloads = 0; sc.paths = []; }
     sc.score += sig.score; sc.probes++; sc.last = now;
+    if (sig.score === 3) sc.payloads = (sc.payloads || 0) + 1;
     sc.paths.unshift(String(info.path).slice(0, 120)); sc.paths.length = Math.min(sc.paths.length, 8);
     this.scores.set(ip, sc);
     if (this.scores.size > 20000) this.scores.delete(this.scores.keys().next().value);
     const v = this.verdicts.get(ip);
+    if (v?.benign && sc.payloads >= 2) {
+      return this.ban(ip, `hunted secrets (${sc.paths.slice(0, 2).join(", ")}); a known scanner (${(v.why || []).slice(0, 1).join("") || "GreyNoise: benign"}), but not one you want indexing your leaks`, "payload", 30 * DAY, info, bw);
+    }
     if (!v?.benign) {
       const marks = lists.filter((l) => l.strength !== "strong").map((l) => (l.id === "tor" ? "is a Tor exit" : `is on ${l.name}`));
       if (v?.bad) marks.push(...v.why.slice(0, 2));

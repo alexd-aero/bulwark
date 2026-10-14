@@ -2,7 +2,7 @@
   "spec": 1,
   "id": "bulwark",
   "name": "Bulwark",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "description": "A shield for everything you publish. Every request is checked in microseconds against 250k+ blocklisted addresses and known attack payloads; attackers are banned on every tunnel at once. Its own dashboard shows every request in full, warns about waves of attackers before they peak, graphs the patterns, keeps your blocklist and reports attackers to the vendors that missed them. On by default; no slower tunnels.",
   "author": "Alexd Aero",
   "license": "MIT",
