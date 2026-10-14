@@ -26,7 +26,8 @@ const ICON = {
   list: svgI('<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6h.01M4 12h.01M4 18h.01"/>'),
   user: svgI('<circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/>'),
   plus: svgI('<path d="M12 5v14M5 12h14"/>'), minus: svgI('<path d="M5 12h14"/>'),
-  fit: svgI('<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>'), tidy: svgI('<rect x="3" y="4" width="7" height="6" rx="1.5"/><rect x="14" y="4" width="7" height="6" rx="1.5"/><rect x="14" y="14" width="7" height="6" rx="1.5"/><path d="M10 7h4M17.5 10v4"/>'),
+  fit: svgI('<rect x="3" y="5" width="18" height="14" rx="2.5"/><circle cx="12" cy="12" r="2.5"/>'),
+  full: svgI('<path d="M15 3h6v6M21 3l-7 7M9 21H3v-6M3 21l7-7"/>'), unfull: svgI('<path d="M14 10l7-7M20 10h-6V4M10 14l-7 7M4 14h6v6"/>'), tidy: svgI('<rect x="3" y="4" width="7" height="6" rx="1.5"/><rect x="14" y="4" width="7" height="6" rx="1.5"/><rect x="14" y="14" width="7" height="6" rx="1.5"/><path d="M10 7h4M17.5 10v4"/>'),
   close: svgI('<path d="M6 6l12 12M18 6 6 18"/>'), arrow: svgI('<path d="M5 12h14M13 6l6 6-6 6"/>'),
 };
 const OUT_ICON = { "out:payload": ICON.ban, "out:lookup": ICON.ban, "out:list": ICON.list, "out:manual": ICON.user, "out:ban": ICON.ban, "out:dropped": ICON.hand, "out:watched": ICON.eye };
@@ -52,9 +53,10 @@ export class Workflow {
           <button type="button" data-wf="out" title="Zoom out" aria-label="Zoom out">${ICON.minus}</button>
           <button type="button" data-wf="fit" title="Fit to view" aria-label="Fit to view">${ICON.fit}</button>
           <button type="button" data-wf="tidy" title="Tidy up" aria-label="Tidy up">${ICON.tidy}</button>
+          <button type="button" data-wf="full" title="Full screen (F)" aria-label="Full screen" aria-pressed="false">${ICON.full}</button>
           <span class="wf-zoom">100%</span>
         </div>
-        <div class="wf-hint">drag to move · <kbd>Ctrl</kbd> + scroll to zoom · click a card or a line</div>
+        <div class="wf-hint">drag to move · <kbd>Ctrl</kbd> + scroll to zoom · <kbd>F</kbd> full screen · click a card or a line</div>
         <div class="wf-tip" hidden></div>
       </div>
       <aside class="wf-panel" aria-live="polite"></aside>`;
@@ -69,7 +71,12 @@ export class Workflow {
     });
     this.ro.observe(this.canvas);
   }
-  destroy() { this.ro.disconnect(); }
+  destroy() {
+    this.ro.disconnect();
+    document.removeEventListener("fullscreenchange", this.onFsChange);
+    document.removeEventListener("keydown", this.onKey);
+    if (this.isFull()) { if (document.fullscreenElement === this.el) document.exitFullscreen().catch(() => {}); document.documentElement.classList.remove("wf-noscroll"); }
+  }
 
   // ------------------------------------------------------------ data
   set(flow, { span } = {}) {
@@ -387,6 +394,7 @@ export class Workflow {
       else if (e.key === "Escape" && this.sel) { e.stopPropagation(); this.select(null); }
       else if (e.key === "+" || e.key === "=") this.zoomAt(1.2);
       else if (e.key === "-") this.zoomAt(1 / 1.2);
+      else if ((e.key === "f" || e.key === "F") && !e.ctrlKey && !e.metaKey && !e.altKey) this.toggleFull();
     });
     c.addEventListener("focusin", (e) => { const n = e.target.closest?.(".wf-node"); if (n) this.applySel({ node: n.dataset.id }); });
     this.el.querySelector(".wf-controls").addEventListener("click", (e) => {
@@ -395,6 +403,7 @@ export class Workflow {
       const a = b.dataset.wf;
       if (a === "in") this.zoomAt(1.2); else if (a === "out") this.zoomAt(1 / 1.2); else if (a === "fit") this.fit();
       else if (a === "tidy") { this.moved.clear(); this.layout(); this.render(); this.fit(); }
+      else if (a === "full") this.toggleFull();
     });
     this.panel.addEventListener("click", (e) => {
       const t = e.target.closest("[data-wfedge],[data-wfnode],[data-wfip],[data-wfclose],[data-wflog]");
@@ -402,12 +411,43 @@ export class Workflow {
       e.stopPropagation();
       if (t.dataset.wfedge) this.select({ edge: t.dataset.wfedge });
       else if (t.dataset.wfnode) this.select({ node: t.dataset.wfnode });
-      else if (t.dataset.wfip) this.onIp?.(t.dataset.wfip);
+      else if (t.dataset.wfip) {
+        // the browser's full screen shows only the graph: step down to the window-filling one, so the drawer shows over it
+        if (document.fullscreenElement === this.el) { this.keepFull = true; document.exitFullscreen().catch(() => {}); }
+        this.onIp?.(t.dataset.wfip);
+      }
       else if (t.dataset.wflog) this.onLog?.(t.dataset.wflog);
       else this.select(null);
     });
+    this.onFsChange = () => { if (!document.fullscreenElement && this.isFull()) { if (this.keepFull) this.keepFull = false; else this.setFull(false); } };
+    document.addEventListener("fullscreenchange", this.onFsChange);
+    this.onKey = (e) => { if (e.key === "Escape" && this.isFull() && !document.fullscreenElement && !this.sel) this.setFull(false); };
+    document.addEventListener("keydown", this.onKey);
     this.panel.addEventListener("mouseover", (e) => { const t = e.target.closest("[data-wfedge]"); if (t) this.applySel({ edge: t.dataset.wfedge }); });
     this.panel.addEventListener("mouseout", (e) => { if (e.target.closest("[data-wfedge]")) this.applySel(); });
+  }
+  // Full screen: the browser's own when it allows it (it may not inside a
+  // frame, or on an iPhone), else the graph fills the window; either way the
+  // canvas and its panel get the whole screen and the view is fitted again.
+  isFull() { return this.el.classList.contains("full"); }
+  async toggleFull() {
+    if (this.isFull()) {
+      if (document.fullscreenElement === this.el) { try { await document.exitFullscreen(); } catch { this.setFull(false); } }
+      else this.setFull(false);
+      return;
+    }
+    this.setFull(true);
+    try { if (this.el.requestFullscreen && document.fullscreenEnabled) await this.el.requestFullscreen({ navigationUI: "hide" }); }
+    catch { /* the window-filling version stays */ }
+  }
+  setFull(on) {
+    this.el.classList.toggle("full", on);
+    document.documentElement.classList.toggle("wf-noscroll", on);
+    const b = this.el.querySelector('[data-wf="full"]');
+    b.innerHTML = on ? ICON.unfull : ICON.full;
+    b.title = on ? "Leave full screen (F or Esc)" : "Full screen (F)";
+    b.setAttribute("aria-pressed", String(on));
+    requestAnimationFrame(() => { if (!this.moved.size) { this.layout(); this.render(); } this.fit(); this.canvas.focus({ preventScroll: true }); });
   }
   hover(e) {
     const node = e.target.closest(".wf-node"), g = !node && e.target.closest(".wf-edge");

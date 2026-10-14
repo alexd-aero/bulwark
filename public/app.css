@@ -309,7 +309,12 @@ td.why { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-spac
 .wf-ip:hover { background: var(--card-2); }
 .wf-ip-a { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .wf-ip-m { display: flex; align-items: center; gap: 8px; }
 .wf-ip-o { grid-column: 1 / -1; font-size: 11px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wf.full { position: fixed; inset: 0; z-index: 19; padding: 12px; background: var(--bg); grid-template-columns: minmax(0, 1fr) 360px; }
+.wf.full .wf-canvas, .wf.full .wf-panel { height: calc(100vh - 24px); height: calc(100dvh - 24px); }
+.wf-controls button[aria-pressed="true"] { color: var(--text); background: var(--card-2); }
+html.wf-noscroll, html.wf-noscroll body { overflow: hidden; }
 @media (max-width: 1100px) { .wf { grid-template-columns: 1fr; } .wf-panel { height: auto; max-height: 560px; } .wf-p-sum { margin-top: 0; } }
+@media (max-width: 1100px) { .wf.full { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) auto; } .wf.full .wf-canvas { height: auto; min-height: 0; } .wf.full .wf-panel { height: auto; max-height: 38vh; } }
 @media (max-width: 640px) { .wf-canvas { height: 500px; } .wf-hint { display: none; } }
 @media (prefers-reduced-motion: reduce) { .wf-edge.lit .wf-flow { animation: none; } .wf-node { transition: none; } }
 .pat-two { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); align-items: start; }
