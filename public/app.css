@@ -212,3 +212,4 @@ td.why { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-spac
 .pill.dev { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
 @media (max-width: 720px) { .dev-how-in { grid-template-columns: 1fr; } .dev-ip { grid-template-columns: 1fr auto; } .dev-ip > .faint:nth-child(2) { grid-column: 1 / -1; order: 3; } }
 .dev-how { margin-bottom: 14px; }
+.pill.check { color: #7aa7ff; border-color: rgba(122,167,255,.35); background: rgba(122,167,255,.06); }

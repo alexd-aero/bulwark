@@ -34,7 +34,8 @@ import { checkIp, useLists } from "./intel.mjs";
 import { paths } from "./config.mjs";
 
 const MIN = 60e3, HOUR = 60 * MIN, DAY = 24 * HOUR;
-export const DEFAULT_SETTINGS = { auto: true, drop: true, lookups: true, report: true, abuseipdbKey: "", ntfy: "", webhook: "", keepDays: 30, strict: true, hostNotices: true };
+export const CLEARED_FOR = 7 * DAY;     // a clean scan lets an address into public tunnels for this long (the guard keeps the same)
+export const DEFAULT_SETTINGS = { auto: true, drop: true, lookups: true, scanFirst: true, report: true, abuseipdbKey: "", ntfy: "", webhook: "", keepDays: 30, strict: true, hostNotices: true };
 const atomic = (file, obj) => { writeFileSync(file + ".tmp", JSON.stringify(obj)); renameSync(file + ".tmp", file); };
 
 // A ban's reason, for a notice row: the gate's sign-in detour undone (the path
@@ -117,6 +118,7 @@ export class Brain {
     const now = Date.now();
     for (const [ip, b] of Object.entries(this.state.bans)) if (b.until && b.until < now) delete this.state.bans[ip];
     for (const [ip, t] of Object.entries(this.state.trusted)) if (now - t > 30 * DAY) delete this.state.trusted[ip];
+    for (const [ip, t] of Object.entries(this.state.cleared ||= {})) if (now - t > CLEARED_FOR) delete this.state.cleared[ip];
     this.state.actions = this.state.actions.slice(0, 500);
     try { atomic(this.file, this.state); this.writeSnapshot(); this.dirty = false; } catch (e) { this.log("save:", e.message); }
   }
@@ -126,7 +128,8 @@ export class Brain {
   snapshot() {
     const now = Date.now();
     return {
-      settings: { auto: this.settings.auto, drop: this.settings.drop, lookups: this.settings.lookups },
+      settings: { auto: this.settings.auto, drop: this.settings.drop, lookups: this.settings.lookups, scanFirst: this.settings.scanFirst },
+      cleared: Object.entries(this.state.cleared || {}).filter(([, t]) => now - t < CLEARED_FOR).slice(-30000),
       bans: Object.entries(this.state.bans).filter(([, b]) => !b.until || b.until > now).map(([ip, b]) => [ip, { reason: b.reason, until: b.until, source: b.source, at: b.at }]),
       allow: Object.keys(this.state.allow), trusted: Object.entries(this.state.trusted), own: [...this.own],
       verdicts: [...this.verdicts].filter(([, v]) => v.bad || v.benign).slice(-20000).map(([ip, v]) => [ip, { bad: v.bad, benign: v.benign, level: v.level, why: v.why }]),
@@ -151,6 +154,7 @@ export class Brain {
       case "trust": this.trust(m.ip, false); break;
       case "history": try { this.importHistory(m.data || {}, m.host); } catch (err) { this.log("history:", err.message); } break;
       case "devices": this.useDevices(m); break;
+      case "scan": this.scanNow(m.ip); break;
     }
   }
   // Your devices, from the host's device keys: {list: [{id, name, ips, hosts, last…}], addresses: {ip: {last, devices}}}.
@@ -339,8 +343,29 @@ export class Brain {
       this.running++;
       const t0 = Date.now();
       this.remote(ip, { probe }).then((r) => { this.lat.push(Date.now() - t0); if (this.lat.length > 300) this.lat.shift(); this.judge(ip, r); })
-        .catch(() => {}).finally(() => { this.running--; this.pump(); });
+        .catch(() => {}).finally(() => { this.running--; this.scanning?.delete(ip); this.pump(); });
     }
+  }
+  // A public tunnel asked: this address, scanned now, first in line (even with
+  // background lookups off: nobody new gets in without it). Clean -> cleared.
+  scanNow(raw) {
+    const ip = normIp(raw);
+    if (!isIP(ip) || isPrivate(ip) || this.own.has(ip)) return;
+    const v = this.verdicts.get(ip);
+    if (v && Date.now() - v.at < CLEARED_FOR) {                  // already known: say it again
+      if (!v.bad) this.clear(ip); else if (!this.state.bans[ip]) this.broadcast({ t: "verdict", ip, v: { bad: v.bad, benign: v.benign, level: v.level, why: v.why } });
+      return;
+    }
+    if (this.offline && !this.remoteInjected) return;
+    if (this.queue.some((q) => q.ip === ip) || this.scanning?.has(ip)) return;
+    (this.scanning ||= new Set()).add(ip);
+    this.queued.set(ip, { at: Date.now(), probe: false });
+    this.queue.unshift({ ip, probe: false, first: true });
+    this.pump();
+  }
+  clear(ip) {
+    (this.state.cleared ||= {})[ip] = Date.now(); this.dirty = true;
+    this.broadcast({ t: "cleared", ip, at: this.state.cleared[ip] });
   }
   // Banned for a hard sign only (GreyNoise has seen it attack, DroneBL lists
   // it); anything else bad bans together with a probe. Known services: innocent.
@@ -354,6 +379,7 @@ export class Brain {
     this.verdicts.set(ip, v);
     if (this.verdicts.size > 50000) this.verdicts.delete(this.verdicts.keys().next().value);
     if (bad || benign) this.broadcast({ t: "verdict", ip, v: { bad, benign, level, why: v.why } });
+    if (!bad) this.clear(ip);                     // nothing against it: public tunnels let it in
     if (!this.settings.auto || this.state.allow[ip] || this.state.bans[ip] || this.isTrusted(ip) || this.own.has(ip) || benign) return;
     const hard = [];
     if (src.greynoise?.result?.classification === "malicious") hard.push("GreyNoise has seen it attack");

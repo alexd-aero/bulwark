@@ -152,6 +152,41 @@ test("your devices: their addresses are trusted as of when used; a request with 
   assert.equal(g.entry("203.0.113.1", { path: "/" }, {}).dev, undefined);
 });
 
+test("public tunnels: scanned first (a checking page, the app asked once), cleared ones pass, flagged ones are blocked; yours never wait", () => {
+  const { g, sent } = guard();
+  const pub = (extra = {}) => ({ path: "/", host: "radio.tunnel.example.com", port: 3000, access: "public", ...extra });
+  let r = g.gate("198.51.100.20", pub());
+  assert.equal(r.status, 403); assert.equal(r.page, "checking");
+  assert.equal(g.gate("198.51.100.20", pub()).page, "checking");
+  assert.equal(sent.filter((m) => m.t === "scan" && m.ip === "198.51.100.20").length, 1, "asked once, not per request");
+  assert.equal(g.gate("198.51.100.20", { ...pub(), access: "login" }), null, "a login tunnel: its login does the job");
+  const v0 = g.edgeVersion;
+  g.apply({ t: "cleared", ip: "198.51.100.20", at: Date.now() });
+  assert.ok(g.edgeVersion > v0, "the relay in front hears of it");
+  assert.equal(g.gate("198.51.100.20", pub()), null, "scanned clean: through");
+  g.apply({ t: "cleared", ip: "198.51.100.21", at: Date.now() - 8 * 864e5 });
+  assert.equal(g.gate("198.51.100.21", pub()).page, "checking", "a week later: scanned again");
+  g.apply({ t: "verdict", ip: "198.51.100.22", v: { bad: true, benign: false, level: "suspicious", why: ["on StopForumSpam"] } });
+  r = g.gate("198.51.100.22", pub());
+  assert.equal(r.page, "blocked"); assert.match(r.why, /flagged by the scan: on StopForumSpam/);
+  g.apply({ t: "verdict", ip: "66.249.66.1", v: { bad: false, benign: true, level: "notice", why: ["Googlebot"] } });
+  assert.equal(g.gate("66.249.66.1", pub()), null, "a known service");
+  assert.equal(g.gate("198.51.100.23", pub({ trusted: () => true })), null, "signed in, or one of your devices: at once");
+  assert.equal(g.gate("198.51.100.24", pub({ device: "d1", trusted: () => true })), null);
+  const info = pub(); g.gate("198.51.100.25", info);
+  assert.equal(g.entry("198.51.100.25", info, { status: 403 }).dec, "check");
+  g.apply({ t: "settings", settings: { scanFirst: false } });
+  assert.equal(g.gate("198.51.100.26", pub()), null, "switched off: as before");
+  g.apply({ t: "settings", settings: { scanFirst: true } });
+  g.apply({ t: "ban", ip: "203.0.113.5", b: { reason: "x", until: null, source: "payload" } });
+  assert.equal(g.gate("203.0.113.5", { path: "/" }).page, "blocked");
+  const e = g.edge();
+  assert.ok(e.on);
+  assert.ok(e.cleared.includes("198.51.100.20") && e.cleared.includes("198.51.100.23"), "cleared and trusted");
+  assert.ok(!e.cleared.includes("198.51.100.21"));
+  assert.deepEqual(e.banned, ["203.0.113.5"]);
+});
+
 test("fast: 100k decisions well under a second", () => {
   const lines = [];
   for (let i = 0; i < 50000; i++) lines.push(`${(i >> 16) & 255}.${(i >> 8) & 255}.${i & 255}.${(i * 7) & 255}\t1`);

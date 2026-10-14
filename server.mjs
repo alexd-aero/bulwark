@@ -229,7 +229,7 @@ export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", 
         }
         brain.logs.keepDays = brain.state.settings.keepDays;
         brain.dirty = true; brain.save(true);
-        brain.broadcast({ t: "settings", settings: { auto: brain.settings.auto, drop: brain.settings.drop, lookups: brain.settings.lookups } });
+        brain.broadcast({ t: "settings", settings: { auto: brain.settings.auto, drop: brain.settings.drop, lookups: brain.settings.lookups, scanFirst: brain.settings.scanFirst } });
       }
       return send(res, 200, { ...brain.settings, abuseipdbKey: brain.settings.abuseipdbKey ? "•".repeat(8) + brain.settings.abuseipdbKey.slice(-4) : "" });
     }

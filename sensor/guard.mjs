@@ -24,6 +24,8 @@ import { lookupIn, RangeSet } from "../core/lists.mjs";
 import { classifyRequest } from "../core/payloads.mjs";
 
 const HOUR = 3600e3, DAY = 24 * HOUR;
+export const CLEARED_FOR = 7 * DAY;          // a clean scan lets an address into public tunnels for this long
+const SCAN_ASK_EVERY = 10e3;
 
 export class Guard {
   constructor({ log, emit } = {}) {
@@ -35,10 +37,13 @@ export class Guard {
     this.trusted = new Map();                // ip -> last sign-in
     this.own = new Set();
     this.verdicts = new Map();               // ip -> {bad, benign, level, why}
+    this.cleared = new Map();                // ip -> when a scan found nothing against it (public tunnels let it in)
+    this.asked = new Map();                  // ip -> when the app was last asked to scan it
+    this.edgeVersion = 0;                    // bumps whenever who may pass changes (Aegis mirrors it to your VPS)
     this.scores = new Map();                 // ip -> {score, probes, paths, last}
-    this.settings = { auto: true, drop: true, lookups: true };
+    this.settings = { auto: true, drop: true, lookups: true, scanFirst: true };
     this.strictUntil = 0;
-    this.stats = { requests: 0, blocked: 0, dropped: 0, banned: 0, us: 0 };
+    this.stats = { requests: 0, blocked: 0, dropped: 0, banned: 0, checks: 0, us: 0 };
   }
 
   // ------------------------------------------------------------ state from the app
@@ -51,18 +56,22 @@ export class Guard {
         if (m.trusted) this.trusted = new Map(m.trusted);
         if (m.own) this.own = new Set(m.own);
         if (m.verdicts) this.verdicts = new Map(m.verdicts);
+        if (m.cleared) this.cleared = new Map(m.cleared);
         this.strictUntil = m.strictUntil || 0;
+        this.edgeVersion++;
         break;
-      case "ban": this.bans.set(m.ip, m.b); break;
-      case "unban": this.bans.delete(m.ip); this.scores.delete(m.ip); break;
-      case "allow": if (m.on) { this.allow.add(m.ip); this.bans.delete(m.ip); } else this.allow.delete(m.ip); break;
+      case "ban": this.bans.set(m.ip, m.b); this.cleared.delete(m.ip); this.edgeVersion++; break;
+      case "unban": this.bans.delete(m.ip); this.scores.delete(m.ip); this.edgeVersion++; break;
+      case "allow": if (m.on) { this.allow.add(m.ip); this.bans.delete(m.ip); } else this.allow.delete(m.ip); this.edgeVersion++; break;
+      // a scan found nothing against it: public tunnels let it in
+      case "cleared": this.cleared.set(m.ip, m.at || Date.now()); this.asked.delete(m.ip); if (this.cleared.size > 50000) this.cleared.delete(this.cleared.keys().next().value); this.edgeVersion++; break;
       case "verdict": this.verdicts.set(m.ip, m.v); if (this.verdicts.size > 50000) this.verdicts.delete(this.verdicts.keys().next().value); break;
       case "settings": this.settings = { ...this.settings, ...m.settings }; break;
       case "own": this.own = new Set(m.list); break;
-      case "trust": this.trusted.set(m.ip, m.at || Date.now()); break;
+      case "trust": this.trusted.set(m.ip, m.at || Date.now()); this.edgeVersion++; break;
       case "strict": this.strictUntil = m.until || 0; break;
       // the addresses your devices used lately (the host's device keys): yours, as of when they were used
-      case "devices": for (const [ip, a] of Object.entries(m.addresses || {})) if (!this.own.has(ip) && (this.trusted.get(ip) || 0) < a.last) this.trusted.set(ip, a.last); break;
+      case "devices": for (const [ip, a] of Object.entries(m.addresses || {})) if (!this.own.has(ip) && (this.trusted.get(ip) || 0) < a.last) { this.trusted.set(ip, a.last); this.edgeVersion++; } break;
       case "listadd": {                                     // new addresses on a list: added in place
         let sets = this.lists.get(m.id);
         if (!sets) { sets = {}; this.lists.set(m.id, sets); }
@@ -119,19 +128,19 @@ export class Guard {
       if (ban.source !== "manual" && trusted()) return null;        // trust() lifted it
       this.stats.blocked++;
       bw.dec = "block"; bw.why = ban.reason;
-      return { status: 403, body: "Blocked.", why: ban.reason };
+      return { status: 403, body: "Blocked.", why: ban.reason, page: "blocked" };
     }
     const lists = lookupIn(this.lists, ip);
     if (lists.length) bw.lists = lists.map((l) => l.id);
     if (!this.settings.auto) {
       if (sig.score === 3 && this.settings.drop && !trusted()) return this.drop(bw, "a payload");
-      return null;
+      return this.scanFirst(ip, info, bw, trusted);
     }
     const strong = lists.filter((l) => l.strength === "strong");
     if (strong.length && !trusted()) return this.ban(ip, `on ${strong.map((l) => l.name).join(", ")}`, "list", 7 * DAY, info, bw);
-    if (!sig.score) return null;
+    if (!sig.score) return this.scanFirst(ip, info, bw, trusted);
     if (trusted()) return null;
-    if (sig.ua && sig.score < 3) return null;            // a scanner's name only labels the request: it never adds up to a ban
+    if (sig.ua && sig.score < 3) return this.scanFirst(ip, info, bw, trusted);   // a scanner's name only labels the request: it never adds up to a ban
     const sc = this.scores.get(ip) || { score: 0, probes: 0, payloads: 0, paths: [], last: now };
     if (now - sc.last > DAY) { sc.score = 0; sc.probes = 0; sc.payloads = 0; sc.paths = []; }
     sc.score += sig.score; sc.probes++; sc.last = now;
@@ -155,7 +164,37 @@ export class Guard {
       }
     }
     if (sig.score === 3 && this.settings.drop) return this.drop(bw, "a payload: never reached the app");
-    return null;
+    return this.scanFirst(ip, info, bw, trusted);
+  }
+  isCleared(ip) { const t = this.cleared.get(ip); return !!t && Date.now() - t < CLEARED_FOR; }
+  // A public tunnel lets in only addresses that are yours, or that a scan found
+  // nothing against. Anyone else gets a "checking" page (403, it reloads by
+  // itself) while the app scans them first in line; one the scan flagged is blocked.
+  scanFirst(ip, info, bw, trusted) {
+    if (info.access !== "public" || !this.settings.scanFirst || trusted() || this.isCleared(ip)) return null;
+    const v = this.verdicts.get(ip);
+    if (v?.benign) return null;
+    this.stats.checks++;
+    if (v?.bad) {
+      bw.dec = "block"; bw.why = `flagged by the scan: ${(v.why || []).slice(0, 2).join(", ") || v.level}`;
+      return { status: 403, body: "Blocked.", why: bw.why, page: "blocked" };
+    }
+    const asked = this.asked.get(ip) || 0;
+    if (Date.now() - asked > SCAN_ASK_EVERY) {
+      this.asked.set(ip, Date.now());
+      if (this.asked.size > 20000) this.asked.delete(this.asked.keys().next().value);
+      this.emit({ t: "scan", ip });
+    }
+    bw.dec = "check"; bw.why = "not scanned yet: checked before a public tunnel";
+    return { status: 403, body: "Checking your address first. Try again in a few seconds.", why: "not scanned yet", page: "checking", retry: 2 };
+  }
+  // who may pass, for a relay in front (Aegis mirrors it to your VPS): addresses only
+  edge() {
+    const now = Date.now();
+    const fresh = (m, ttl) => [...m].filter(([ip, t]) => now - t < ttl && !this.own.has(ip)).map(([ip]) => ip);
+    return { version: this.edgeVersion, on: !!this.settings.scanFirst,
+             cleared: [...new Set([...fresh(this.cleared, CLEARED_FOR), ...fresh(this.trusted, 30 * DAY), ...this.allow])],
+             banned: [...this.bans].filter(([ip, b]) => (!b.until || b.until > now) && !this.allow.has(ip) && !this.isTrusted(ip)).map(([ip]) => ip) };
   }
   drop(bw, why) {
     this.stats.dropped++;
@@ -169,7 +208,7 @@ export class Guard {
     this.stats.banned++;
     bw.dec = "ban"; bw.why = b.reason;
     this.emit({ t: "ban", ip, b, info: { host: info.host || "", country: info.country || "", path: String(info.path || "").slice(0, 200) } });
-    return { status: 403, body: "Blocked.", why: b.reason };
+    return { status: 403, body: "Blocked.", why: b.reason, page: "blocked" };
   }
 
   // one line of the log, for the app: everything about the request, and what was done

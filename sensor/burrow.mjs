@@ -6,6 +6,10 @@
 //   observe(ip, info, res)   when the response is done: one line for the log,
 //                            batched to the app every 250 ms (never awaited)
 //   signedIn(ip)             a sign-in: that address is yours
+//   edge() / edgeVersion()   who may pass (cleared and trusted addresses, banned
+//                            ones), for a relay in front: Aegis mirrors it to your
+//                            VPS, so public tunnels turn away unscanned visitors there
+//   scan(ip)                 a relay in front met someone new: scan them first in line
 //   peek(ip) / lookup(ip)    for the gate's own pages and IP checks
 //   mount                    the dashboard under the gate's login (/__gate/bulwark),
 //                            and a tile on the gate's home page
@@ -157,6 +161,16 @@ export function observe(ip, info, res) {
   } catch { /* never in the way */ }
 }
 export function signedIn(ip) { guardObj?.trust(ip); }
+export function edge() { return guardObj ? guardObj.edge() : null; }
+export function edgeVersion() { return guardObj ? guardObj.edgeVersion : -1; }
+export function scan(ip) {
+  if (!guardObj) return;
+  const a = guardObj.asked.get(ip) || 0;
+  if (Date.now() - a < 10e3) return;
+  guardObj.asked.set(ip, Date.now());
+  const m = { t: "scan", ip };
+  if (!send(m) && pending.length < 2000) pending.push(m);
+}
 export function peek(ip) {
   if (!guardObj) return null;
   const b = guardObj.bans.get(ip);

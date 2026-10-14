@@ -26,7 +26,7 @@ const ICONS = {
 };
 for (const i of document.querySelectorAll("[data-i]")) i.innerHTML = ICONS[i.dataset.i] || "";
 
-const DEC = { pass: ["pass", "through"], drop: ["drop", "payload dropped"], block: ["block", "blocked"], ban: ["ban", "banned"], seen: ["seen", "from the host's history"] };
+const DEC = { pass: ["pass", "through"], drop: ["drop", "payload dropped"], block: ["block", "blocked"], ban: ["ban", "banned"], seen: ["seen", "from the host's history"], check: ["check", "checked first"] };
 const SEVP = { critical: "crit", warn: "warn", info: "info" };
 const SPAN_KEYS = ["15m", "1h", "6h", "24h", "7d", "30d", "90d"];
 // your devices (the host's device keys): id -> name, for the log and the address drawer
@@ -325,7 +325,8 @@ async function renderSettings() {
         ${sw("auto", "Ban automatically", "Strong blocklists, known attackers, two payloads, or a probe from an address with any mark against it.")}
         ${sw("drop", "Drop payloads", "/.env, /.git, ../../etc/passwd, phpunit, ${jndi:…} get a 404 and never reach the app.")}
         ${sw("lookups", "Look up every new address", "Behind the request, never in its way: Spamhaus, DroneBL, StopForumSpam, GreyNoise for probes. Known services (search engines, scrapers) are left alone.")}
-        ${sw("strict", "Strict mode during critical waves", "While a critical wave is on, a first payload bans.")}</section>
+        ${sw("strict", "Strict mode during critical waves", "While a critical wave is on, a first payload bans.")}
+        ${sw("scanFirst", "Scan before public tunnels", "Someone new gets a \"checking your connection\" page until their address is scanned (about a second; it reloads by itself), and only then the tunnel. With your VPS in front, they never reach this machine before that. Yours (signed in, your devices) pass at once.")}</section>
       <section class="card"><h3>Alerts &amp; logs</h3>
         <label class="field"><span>ntfy topic URL (push to your phone: ntfy.sh/your-secret-topic)</span><input class="input mono" id="sNtfy" value="${h(s.ntfy)}" placeholder="https://ntfy.sh/…"></label>
         <label class="field"><span>Webhook (JSON POST for every wave)</span><input class="input mono" id="sHook" value="${h(s.webhook)}" placeholder="https://…"></label>

@@ -161,6 +161,20 @@ test("your devices: the host's list comes in, their addresses are trusted as of 
   assert.ok(await until(() => got.some((m) => m.t === "devices?")), "the guard is asked again");
 });
 
+test("a public tunnel asks for a scan: clean ones are cleared (and stay so), a known attacker is banned", async () => {
+  got.length = 0;
+  tell({ t: "scan", ip: "192.0.2.60" });
+  assert.ok(await until(() => got.some((m) => m.t === "cleared" && m.ip === "192.0.2.60")), "cleared");
+  assert.ok(app.brain.state.cleared["192.0.2.60"]);
+  tell({ t: "scan", ip: "203.0.113.66" });
+  assert.ok(await until(() => app.brain.state.bans["203.0.113.66"]), "GreyNoise has seen it attack: banned");
+  assert.equal(got.some((m) => m.t === "cleared" && m.ip === "203.0.113.66"), false);
+  got.length = 0;
+  tell({ t: "scan", ip: "192.0.2.60" });
+  assert.ok(await until(() => got.some((m) => m.t === "cleared" && m.ip === "192.0.2.60")), "asked again: told again, without a new lookup");
+  assert.ok(app.brain.snapshot().cleared.some(([ip]) => ip === "192.0.2.60"), "a reconnecting guard gets it");
+});
+
 test("settings: the key is never shown; the guards get the switches", async () => {
   const r = await fetch(base() + "/api/settings", { method: "PUT", headers: { "x-bulwark-key": "k", "Content-Type": "application/json" }, body: JSON.stringify({ abuseipdbKey: "secret-abc1234", drop: false }) }).then((x) => x.json());
   assert.equal(r.abuseipdbKey, "••••••••1234");
