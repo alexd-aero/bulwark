@@ -20,7 +20,7 @@ import { timingSafeEqual, createHash } from "node:crypto";
 import { loadConfig } from "./core/config.mjs";
 import { Brain, DEFAULT_SETTINGS } from "./core/brain.mjs";
 import { checkIp } from "./core/intel.mjs";
-import { isIP, normIp, netOf } from "./core/net.mjs";
+import { isIP, isPrivate, normIp, netOf } from "./core/net.mjs";
 import { signatureById, SIGNATURES } from "./core/payloads.mjs";
 
 const APP = dirname(fileURLToPath(import.meta.url));
@@ -83,8 +83,10 @@ export function startApp({ home, port, bind = "127.0.0.1", key, offline = false,
       logs: await brain.logs.query({ ip, limit: 300 }),
     };
   };
+  // yours (signed in, trusted, allowed, this machine, local) are never "strangers"
+  const mine = (p) => p.auth || isPrivate(p.ip) || brain.own.has(p.ip) || brain.isTrusted(p.ip) || !!brain.state.allow[p.ip];
   const tops = (since) => {
-    const ips = brain.profiles.recent(since, 5000);
+    const all = brain.profiles.recent(since, 5000), ips = all.filter((p) => !mine(p));
     const by = (fn) => { const m = new Map(); for (const p of ips) for (const [k, n] of fn(p)) m.set(k, (m.get(k) || 0) + n); return [...m].sort((a, b) => b[1] - a[1]); };
     return {
       ips: ips.filter((p) => !p.auth).sort((a, b) => b.n - a.n).slice(0, 15).map((p) => ({ ip: p.ip, n: p.n, cc: p.cc, org: p.org, dc: p.dc, banned: !!brain.state.bans[p.ip], sigs: Object.keys(p.sigs).length })),
@@ -92,12 +94,12 @@ export function startApp({ home, port, bind = "127.0.0.1", key, offline = false,
       orgs: by((p) => (p.org && !p.auth ? [[`${p.asn}|${p.org}|${p.dc ? 1 : 0}`, p.n]] : [])).slice(0, 10).map(([k, n]) => { const [asn, org, dc] = k.split("|"); return { asn: Number(asn), org, dc: dc === "1", n }; }),
       countries: by((p) => (p.cc && !p.auth ? [[p.cc, 1]] : [])).slice(0, 12).map(([cc, n]) => ({ cc, n })),
       hosts: by((p) => Object.entries(p.hosts)).slice(0, 10).map(([host, n]) => ({ host, n })),
-      seen: ips.length,
+      seen: all.length,
     };
   };
   // the patterns graph: addresses linked to what they asked for and who holds them
   const graph = (since) => {
-    const ips = brain.profiles.recent(since, 20000).filter((p) => !p.auth && (Object.keys(p.sigs).length || brain.state.bans[p.ip]))
+    const ips = brain.profiles.recent(since, 20000).filter((p) => !mine(p) && (Object.keys(p.sigs).length || brain.state.bans[p.ip]))
       .sort((a, b) => b.n - a.n).slice(0, 160);
     const nodes = new Map(), edges = [];
     const node = (id, x) => { if (!nodes.has(id)) nodes.set(id, { id, ...x, w: 0 }); return nodes.get(id); };
@@ -227,7 +229,7 @@ export function startApp({ home, port, bind = "127.0.0.1", key, offline = false,
     let path = url.pathname;
     try {
       // the key: a header from a host, a cookie, or ?k= once (then the cookie)
-      const k = req.headers["x-bulwark-key"] || cookie(req) || url.searchParams.get("k");
+      const k = req.headers["x-bulwark-key"] || url.searchParams.get("k") || cookie(req);      // a fresh ?k= link wins over an old cookie
       if (!okKey(k)) {
         if (path === "/api/status") return send(res, 200, { ok: true, name: "Bulwark", version: VERSION });
         return send(res, 401, path.startsWith("/api/") ? { error: "key required" } : "<!doctype html><title>Bulwark</title><body style='font:15px system-ui;background:#0b0c0e;color:#ddd;display:grid;place-items:center;height:100vh'><p>Open Bulwark from its host (Burrow or Selkies Forge), or with <code>?k=&lt;key&gt;</code> from <code>bulwark key</code>.</p>", path.startsWith("/api/") ? "application/json" : "text/html; charset=utf-8");
