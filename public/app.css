@@ -3,7 +3,7 @@
   --bg: #08090b; --bg-2: #0d0f12; --card: #111317; --card-2: #15181d; --line: #1e2228; --line-2: #2a2f37;
   --text: #e9ebee; --muted: #8c929b; --faint: #5b616a;
   --accent: #ff6a3d; --accent-2: #e5384f;
-  --pass: #4b5563; --pass-hi: #9aa3ae; --drop: #f2b53c; --block: #ff5a52; --ban: #e040fb; --new: #46c2ff; --ok: #35d39a;
+  --pass: #4b5563; --pass-hi: #9aa3ae; --drop: #f2b53c; --block: #ff5a52; --ban: #e040fb; --known: #8b7bff; --new: #46c2ff; --ok: #35d39a;
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   --sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --r: 12px;
@@ -264,6 +264,7 @@ td.why { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-spac
 .wf-stage em { font-style: normal; font-weight: 400; font-size: 11px; color: var(--faint); }
 .wf-group { position: absolute; font: 600 10px var(--mono); letter-spacing: .1em; text-transform: uppercase; pointer-events: none; white-space: nowrap; }
 .wf-group.payload { color: color-mix(in srgb, var(--block) 75%, var(--faint)); } .wf-group.probe { color: color-mix(in srgb, var(--drop) 75%, var(--faint)); }
+.wf-group.known { color: color-mix(in srgb, var(--known) 75%, var(--faint)); }
 .wf-elabel { position: absolute; transform: translate(-50%, -50%); padding: 3px 9px; border-radius: 99px; background: #0d0f12; border: 1px solid var(--line-2); font: 11px var(--mono); color: var(--text); white-space: nowrap; pointer-events: none; z-index: 4; box-shadow: 0 6px 16px rgba(0,0,0,.6); }
 .wf-controls { position: absolute; left: 12px; bottom: 12px; display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 10px; background: rgba(17,19,23,.92); border: 1px solid var(--line-2); backdrop-filter: blur(6px); }
 .wf-controls button { width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 7px; background: none; color: var(--muted); cursor: pointer; }
@@ -294,7 +295,7 @@ td.why { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-spac
 .wf-p-note { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.55; }
 .wf-steps { margin: 0; padding-left: 18px; display: grid; gap: 10px; color: var(--muted); font-size: 12.5px; line-height: 1.55; }
 .wf-steps b { color: var(--text); font-weight: 600; }
-.wf-k { font-weight: 600; } .wf-k.payload { color: var(--block); } .wf-k.probe { color: var(--drop); }
+.wf-k { font-weight: 600; } .wf-k.payload { color: var(--block); } .wf-k.probe { color: var(--drop); } .wf-k.known { color: var(--known); }
 .wf-p-sec h4 { margin: 0 0 8px; font: 600 10.5px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--faint); display: flex; align-items: center; gap: 8px; }
 .wf-p-span { font-weight: 400; letter-spacing: 0; text-transform: none; }
 .wf-conn { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; padding: 7px 8px; border: 0; border-radius: 8px; background: none; color: var(--text); cursor: pointer; text-align: left; }

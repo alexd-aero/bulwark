@@ -96,7 +96,7 @@ export class Logs {
 }
 
 // ------------------------------------------------------------------ series
-const blank = () => ({ req: 0, pass: 0, drop: 0, block: 0, ban: 0, newIp: 0, probe: 0, payload: 0, bytes: 0, ips: 0, sig: {} });
+const blank = () => ({ req: 0, pass: 0, drop: 0, block: 0, ban: 0, check: 0, newIp: 0, probe: 0, payload: 0, bytes: 0, ips: 0, sig: {} });
 export class Series {
   constructor({ file }) {
     this.file = file;
@@ -106,13 +106,15 @@ export class Series {
       this.min = new Map(s.min); this.hour = new Map(s.hour);
     } catch { /* first run */ }
   }
-  add(e, isNew) {
+  // mine: your own traffic (signed in, trusted, allowed, local) counts as traffic, never as attacks
+  add(e, isNew, mine = false) {
     const k = Math.floor(e.t / MIN), h = Math.floor(e.t / HOUR);
     for (const [map, key] of [[this.min, k], [this.hour, h]]) {
       let b = map.get(key);
       if (!b) { b = blank(); map.set(key, b); }
       b.req++; b[e.dec] = (b[e.dec] || 0) + 1; b.bytes += e.b || 0;
       if (isNew) b.newIp++;
+      if (mine) continue;
       if (e.sc === 3) b.payload++; else if (e.sc === 1) b.probe++;
       if (e.sig) b.sig[e.sig] = (b.sig[e.sig] || 0) + 1;
     }
@@ -138,7 +140,7 @@ export class Series {
       for (let k = s; k < s + per; k++) {
         const b = map.get(k);
         if (!b) continue;
-        for (const f of ["req", "pass", "drop", "block", "ban", "newIp", "probe", "payload", "bytes", "ips"]) p[f] += b[f] || 0;
+        for (const f of ["req", "pass", "drop", "block", "ban", "check", "newIp", "probe", "payload", "bytes", "ips"]) p[f] += b[f] || 0;
         for (const [sig, n] of Object.entries(b.sig || {})) p.sig[sig] = (p.sig[sig] || 0) + n;
       }
       out.push(p);
@@ -151,7 +153,7 @@ export class Series {
     const from = Math.floor((now - spanMs) / unit), t = blank();
     for (const [k, b] of map) {
       if (k < from) continue;
-      for (const f of ["req", "pass", "drop", "block", "ban", "newIp", "probe", "payload", "bytes"]) t[f] += b[f] || 0;
+      for (const f of ["req", "pass", "drop", "block", "ban", "check", "newIp", "probe", "payload", "bytes"]) t[f] += b[f] || 0;
     }
     delete t.sig; delete t.ips;
     return t;

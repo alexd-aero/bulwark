@@ -304,7 +304,7 @@ export class Brain {
     if (e.auth && !e.own) this.trust(e.ip, true);
     const [p, isNew] = this.profiles.add(e);
     if (a) { p.asn = a.asn; p.org = a.name; p.dc = !!a.hosting; }
-    this.series.add(e, isNew);
+    this.series.add(e, isNew, mine || !!e.local);
     this.logs.add(e);
     this.waves.feed(e, p, isNew, mine);
     if (e.dec === "block") { const b = this.state.bans[e.ip]; if (b) { b.hits = (b.hits || 0) + 1; b.last = e.t; this.dirty = true; } }

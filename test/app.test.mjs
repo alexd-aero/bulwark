@@ -124,6 +124,14 @@ test("a wave: logged in full, banned, a campaign alert, the graph and the export
   assert.equal(lw.ips.length, link.ips, "a connection's addresses");
   const ol = g.flow.outLinks[0], ow = await get(`/api/patterns/who?span=1h&id=${encodeURIComponent(`${ol.a}|${ol.b}`)}`);
   assert.equal(ow.ips.length, ol.ips);
+  // banned without trying anything (the lookup's GreyNoise verdict): through "known bad", never off the graph
+  const known = g.flow.sigs.find((x) => x.id === "sig:none");
+  assert.ok(known && known.ips >= 1, "a known-bad card");
+  assert.ok(g.flow.links.some((l) => l.b === "sig:none") && g.flow.outLinks.some((l) => l.a === "sig:none" && l.b === "out:lookup"));
+  assert.equal(g.totals.attacked + g.totals.known, g.totals.ips);
+  assert.ok(!g.sigs.some((x) => x.id === "sig:none"), "and it isn't a pattern");
+  const kw = await get("/api/patterns/who?span=1h&id=sig:none");
+  assert.ok(kw.ips.some((x) => x.ip === "203.0.113.66" && x.n >= 1));
   // overview
   const o = await get("/api/overview?span=1h");
   assert.equal(o.totals.req, 15);
@@ -157,6 +165,15 @@ test("a sign-in from a guard lifts an automatic ban and makes the address yours"
   await sleep(100);
   assert.equal(app.brain.state.bans["104.199.226.84"], undefined);
   assert.ok(app.brain.isTrusted("104.199.226.84"));
+});
+
+test("your own traffic is traffic, never attacks: a signed-in .php page isn't counted as a probe", async () => {
+  const before = await get("/api/overview?span=1h");
+  tell({ t: "ev", list: [{ t: Date.now(), ip: "198.51.100.9", cc: "US", host: "app.example", m: "GET", path: "/index.php", ua: "Mozilla/5.0", dec: "pass", sig: "php-probe", sc: 1, st: 200, b: 100, auth: true }] });
+  await until(async () => (await get("/api/overview?span=1h")).totals.req === before.totals.req + 1);
+  const o = await get("/api/overview?span=1h");
+  assert.equal(o.totals.probe, before.totals.probe, "not an attack");
+  assert.ok(!o.tops.sigs.some((x) => x.id === "php-probe"));
 });
 
 test("your devices: the host's list comes in, their addresses are trusted as of when used, an automatic ban on one lifts", async () => {

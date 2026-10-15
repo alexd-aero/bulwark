@@ -11,7 +11,7 @@
 // zoom; "Fit" brings everything back into view, "Tidy up" lays it out again.
 
 const NODE_W = 250, NODE_H = 56, COL_GAP = 150, ROW_GAP = 10, GROUP_GAP = 34;
-const COLORS = { net: "var(--pass-hi)", payload: "var(--block)", probe: "var(--drop)",
+const COLORS = { net: "var(--pass-hi)", payload: "var(--block)", probe: "var(--drop)", known: "var(--known)", "out:blocked": "var(--block)",
   "out:payload": "var(--ban)", "out:lookup": "var(--ban)", "out:list": "var(--ban)", "out:manual": "var(--ban)", "out:ban": "var(--ban)", "out:dropped": "var(--drop)", "out:watched": "var(--pass-hi)" };
 const svgI = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
 const ICON = {
@@ -30,12 +30,13 @@ const ICON = {
   full: svgI('<path d="M15 3h6v6M21 3l-7 7M9 21H3v-6M3 21l7-7"/>'), unfull: svgI('<path d="M14 10l7-7M20 10h-6V4M10 14l-7 7M4 14h6v6"/>'), tidy: svgI('<rect x="3" y="4" width="7" height="6" rx="1.5"/><rect x="14" y="4" width="7" height="6" rx="1.5"/><rect x="14" y="14" width="7" height="6" rx="1.5"/><path d="M10 7h4M17.5 10v4"/>'),
   close: svgI('<path d="M6 6l12 12M18 6 6 18"/>'), arrow: svgI('<path d="M5 12h14M13 6l6 6-6 6"/>'),
 };
-const OUT_ICON = { "out:payload": ICON.ban, "out:lookup": ICON.ban, "out:list": ICON.list, "out:manual": ICON.user, "out:ban": ICON.ban, "out:dropped": ICON.hand, "out:watched": ICON.eye };
+const OUT_ICON = { "out:payload": ICON.ban, "out:lookup": ICON.ban, "out:list": ICON.list, "out:manual": ICON.user, "out:ban": ICON.ban, "out:dropped": ICON.hand, "out:watched": ICON.eye, "out:blocked": ICON.hand };
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = (n) => (n >= 1e4 ? (n / 1e3).toFixed(1) + "k" : Math.round(n || 0).toLocaleString());
 const plural = (n, w, ws = w + "s") => `${fmt(n)} ${n === 1 ? w : ws}`;
 export const netLabel = (org) => { const m = /^[A-Z0-9_.-]+ - (.+)$/.exec(String(org || "")); return (m ? m[1] : String(org || "")).trim() || "unknown network"; };
 const flagOf = (cc) => (/^[A-Z]{2}$/.test(cc || "") ? String.fromCodePoint(...[...cc].map((c) => 127397 + c.charCodeAt(0))) : "");
+const GROUP_LABEL = { payload: "payloads · dropped on sight", probe: "probes · counted, not dropped", known: "known bad · stopped for who they are" };
 const STAGES = [["Where they come from", "networks"], ["What they tried", "attack patterns"], ["What Bulwark did", "the outcome"]];
 
 export class Workflow {
@@ -84,9 +85,10 @@ export class Workflow {
     const used = new Set([...flow.links, ...(flow.outLinks || [])].flatMap((l) => [l.a, l.b]));
     const nodes = [];
     for (const n of flow.nets) if (used.has(n.id)) nodes.push({ ...n, col: 0, type: "net", title: n.other ? n.org : netLabel(n.org) });
-    // payloads first, then probes; the busiest on top, "other" last in each
-    const sigs = flow.sigs.filter((x) => used.has(x.id)).sort((a, b) => (b.score === 3) - (a.score === 3) || (a.other ? 1 : 0) - (b.other ? 1 : 0) || b.ips - a.ips || b.requests - a.requests);
-    for (const s of sigs) nodes.push({ ...s, col: 1, type: s.score === 3 ? "payload" : "probe", title: s.name });
+    // payloads first, then probes, then "known bad" (stopped without trying anything); the busiest on top, "other" last in each
+    const typeOf = (x) => (x.known ? "known" : x.score === 3 ? "payload" : "probe"), RANK = { payload: 0, probe: 1, known: 2 };
+    const sigs = flow.sigs.filter((x) => used.has(x.id)).sort((a, b) => RANK[typeOf(a)] - RANK[typeOf(b)] || (a.other ? 1 : 0) - (b.other ? 1 : 0) || b.ips - a.ips || b.requests - a.requests);
+    for (const s of sigs) nodes.push({ ...s, col: 1, type: typeOf(s), title: s.name });
     for (const o of flow.outcomes || []) if (used.has(o.id)) nodes.push({ ...o, col: 2, type: "out", title: o.name });
     this.nodes = nodes; this.byId = new Map(nodes.map((n) => [n.id, n]));
     this.edges = [...flow.links, ...(flow.outLinks || [])].filter((l) => this.byId.has(l.a) && this.byId.has(l.b))
@@ -104,8 +106,8 @@ export class Workflow {
     this.colGap = Math.round(Math.max(COL_GAP, Math.min(380, (cw / 0.9 - 3 * NODE_W - 120) / 2)));
     const cols = [[], [], []];
     for (const n of this.nodes) cols[n.col].push(n);
-    // the middle column: payloads, then probes, each a group of its own
-    const heights = cols.map((c, i) => c.length * (NODE_H + ROW_GAP) - ROW_GAP + (i === 1 && c.some((n) => n.type === "probe") && c.some((n) => n.type === "payload") ? GROUP_GAP : 0));
+    // the middle column: payloads, probes, known bad, each a group of its own
+    const heights = cols.map((c, i) => c.length * (NODE_H + ROW_GAP) - ROW_GAP + (i === 1 ? (new Set(c.map((n) => n.type)).size - 1) * GROUP_GAP : 0));
     const H = Math.max(...heights);
     this.groups = [];
     cols.forEach((c, i) => {
@@ -125,7 +127,7 @@ export class Workflow {
   render() {
     this.nodesEl.innerHTML = this.nodes.map((n) => this.card(n)).join("");
     this.labelsEl.innerHTML = STAGES.map(([t, s], i) => `<div class="wf-stage" style="left:${i * (NODE_W + this.colGap)}px;top:-58px;width:${NODE_W}px"><b>${i + 1}</b><span>${t}<em>${s}</em></span></div>`).join("")
-      + (this.groups.length > 1 ? this.groups.map((g) => `<div class="wf-group ${g.type}" style="left:${NODE_W + this.colGap}px;top:${g.y - 18}px">${g.type === "payload" ? "payloads · dropped on sight" : "probes · counted, not dropped"}</div>`).join("") : "")
+      + (this.groups.length > 1 ? this.groups.map((g) => `<div class="wf-group ${g.type}" style="left:${NODE_W + this.colGap}px;top:${g.y - 18}px">${GROUP_LABEL[g.type]}</div>`).join("") : "")
       + '<div class="wf-elabel" hidden></div>';
     this.elabel = this.labelsEl.querySelector(".wf-elabel");
     this.drawEdges();
@@ -133,11 +135,11 @@ export class Workflow {
   }
   card(n) {
     const k = n.type, other = n.other ? " other" : "";
-    const icon = k === "net" ? (n.other ? ICON.stack : n.dc ? ICON.server : ICON.globe) : k === "payload" ? ICON.key : k === "probe" ? ICON.search : OUT_ICON[n.id] || ICON.ban;
+    const icon = k === "net" ? (n.other ? ICON.stack : n.dc ? ICON.server : ICON.globe) : k === "payload" ? ICON.key : k === "probe" ? ICON.search : k === "known" ? ICON.list : OUT_ICON[n.id] || ICON.ban;
     const ban = k !== "out" && n.ips ? n.banned / n.ips : null;
     const stats = k === "out" ? `<span><b>${fmt(n.ips)}</b> ${n.ips === 1 ? "address" : "addresses"}</span>`
       : k === "net" ? `<span><b>${fmt(n.ips)}</b> addr</span>${n.banned ? `<span class="wf-banned"><b>${fmt(n.banned)}</b> banned</span>` : ""}${n.other ? `<span>${fmt(n.count)} nets</span>` : n.dc ? '<span class="wf-tag">hosting</span>' : ""}`
-      : `<span><b>${fmt(n.ips)}</b> addr</span>${n.requests ? `<span><b>${fmt(n.requests)}</b> tries</span>` : ""}${n.banned ? `<span class="wf-banned"><b>${fmt(n.banned)}</b> banned</span>` : ""}`;
+      : `<span><b>${fmt(n.ips)}</b> addr</span>${n.requests ? `<span><b>${fmt(n.requests)}</b> ${k === "known" ? "req" : "tries"}</span>` : ""}${n.banned ? `<span class="wf-banned"><b>${fmt(n.banned)}</b> banned</span>` : ""}`;
     return `<div class="wf-node ${k}${other}" data-id="${esc(n.id)}" tabindex="0" role="button" aria-label="${esc(n.title)}: ${n.ips} addresses" style="left:${n.x}px;top:${n.y}px;--c:${COLORS[k === "out" ? n.id : k]}">
       ${n.col > 0 ? '<i class="wf-port in"></i>' : ""}${n.col < 2 ? '<i class="wf-port out"></i>' : ""}
       <span class="wf-ic">${icon}</span>
@@ -228,11 +230,11 @@ export class Workflow {
       P.innerHTML = `<div class="wf-p-head"><span class="wf-p-kind">How to read it</span><h3>Left to right, like a workflow</h3></div>
         <ol class="wf-steps">
           <li><b>Where they come from.</b> Each card is a network (the company that owns the addresses). Hosting means a data centre: rented servers, rarely a person.</li>
-          <li><b>What they tried.</b> <span class="wf-k payload">Payloads</span> go after secrets or a way in and are dropped on sight; <span class="wf-k probe">probes</span> ask for software that isn't here.</li>
+          <li><b>What they tried.</b> <span class="wf-k payload">Payloads</span> go after secrets or a way in and are dropped on sight; <span class="wf-k probe">probes</span> ask for software that isn't here; <span class="wf-k known">known bad</span> tried nothing: Bulwark knew them already (a blocklist, the lookups, you).</li>
           <li><b>What Bulwark did.</b> Banned (everywhere, for days), stopped without a ban yet, or only watched.</li>
         </ol>
         <p class="wf-p-note">A line's width is how many addresses took that path. Click a card or a line for the addresses behind it.</p>
-        ${all ? `<div class="wf-p-sum"><div><b>${fmt(by(0).reduce((a, n) => a + n.ips, 0))}</b><span>attacking addresses</span></div><div><b>${fmt(banned)}</b><span>banned (${Math.round((100 * banned) / all)}%)</span></div></div>` : ""}`;
+        ${all ? `<div class="wf-p-sum"><div><b>${fmt(by(0).reduce((a, n) => a + n.ips, 0))}</b><span>hostile addresses</span></div><div><b>${fmt(banned)}</b><span>banned (${Math.round((100 * banned) / all)}%)</span></div></div>` : ""}`;
       return;
     }
     if (this.sel.node) return this.nodePanel(this.byId.get(this.sel.node));
@@ -251,10 +253,10 @@ export class Workflow {
   nodePanel(n) {
     if (!n) return;
     const ins = this.edges.filter((e) => e.b === n.id), outs = this.edges.filter((e) => e.a === n.id);
-    const kind = n.type === "net" ? (n.other ? "Networks" : n.dc ? "Hosting network" : "Network") : n.type === "payload" ? "Payload pattern" : n.type === "probe" ? "Probe pattern" : "Outcome";
+    const kind = n.type === "net" ? (n.other ? "Networks" : n.dc ? "Hosting network" : "Network") : n.type === "payload" ? "Payload pattern" : n.type === "probe" ? "Probe pattern" : n.type === "known" ? "No pattern" : "Outcome";
     const what = n.type === "payload" ? "Requests after secrets or a way in. Nobody needs these, so every one is dropped, and an address that sends them is banned."
       : n.type === "probe" ? "Requests for software that isn't here (an admin page, a CMS). Counted and answered normally; with bad reputation they lead to a ban."
-      : n.type === "out" ? n.what : n.other ? "The quieter networks, folded into one card so the busy ones stay readable." : `The addresses below belong to ${esc(n.org)}${n.asn ? ` (AS${n.asn})` : ""}.${n.dc ? " A hosting network: rented servers, rarely a person at home." : ""}`;
+      : n.type === "out" || n.type === "known" ? n.what : n.other ? "The quieter networks, folded into one card so the busy ones stay readable." : `The addresses below belong to ${esc(n.org)}${n.asn ? ` (AS${n.asn})` : ""}.${n.dc ? " A hosting network: rented servers, rarely a person at home." : ""}`;
     const ex = (n.examples || []).length ? `<div class="wf-p-sec"><h4>What it looks like</h4><div class="wf-ex">${n.examples.map((p) => `<code>${esc(p)}</code>`).join("")}</div></div>` : "";
     const sections = [
       ins.length ? `<div class="wf-p-sec"><h4>${n.type === "out" ? "After trying" : "Came from"}</h4>${this.conns(ins, "in")}</div>` : "",
@@ -263,7 +265,7 @@ export class Workflow {
     const log = (n.type === "payload" || n.type === "probe") && !n.other && n.sig ? `<button type="button" class="btn sm ghost" data-wflog="${esc(n.sig)}">Its requests in the live log</button>` : "";
     this.panel.innerHTML = `<div class="wf-p-head" style="--c:${COLORS[n.type === "out" ? n.id : n.type]}"><span class="wf-p-kind">${kind}</span>
         <button type="button" class="wf-p-x" data-wfclose aria-label="Close">${ICON.close}</button><h3>${esc(n.title)}</h3></div>
-      <div class="wf-p-stats"><div><b>${fmt(n.ips)}</b><span>addresses</span></div>${n.type !== "out" ? `<div><b>${fmt(n.banned || 0)}</b><span>banned</span></div>` : ""}<div><b>${fmt(n.requests || 0)}</b><span>${n.type === "net" || n.type === "out" ? "requests" : "tries"}</span></div></div>
+      <div class="wf-p-stats"><div><b>${fmt(n.ips)}</b><span>addresses</span></div>${n.type !== "out" ? `<div><b>${fmt(n.banned || 0)}</b><span>banned</span></div>` : ""}<div><b>${fmt(n.requests || 0)}</b><span>${n.type === "payload" || n.type === "probe" ? "tries" : "requests"}</span></div></div>
       <p class="wf-p-note">${what}</p>${ex}${sections}
       <div class="wf-p-sec"><h4>Addresses <span class="wf-p-span">${esc(this.span)}</span></h4><div class="wf-ips"><p class="muted small"><span class="spin"></span> Finding them…</p></div>${log}</div>`;
     this.loadIps(n.id);
@@ -271,12 +273,15 @@ export class Workflow {
   edgePanel(e) {
     if (!e) return;
     const a = this.byId.get(e.a), b = this.byId.get(e.b);
-    const sentence = b.col === 1 ? `${plural(e.ips, "address", "addresses")} from ${esc(a.title)} tried ${esc(b.title)}${e.requests ? `, ${plural(e.requests, "time")} in all` : ""}.`
-      : `${plural(e.ips, "address", "addresses")} that tried ${esc(a.title)} ${b.id === "out:watched" ? "were only watched" : b.id === "out:dropped" ? "were stopped but not banned yet" : `ended up ${esc(b.title.toLowerCase())}`}.`;
+    const did = b.id === "out:watched" ? "were only watched" : b.id === "out:dropped" ? "were stopped but not banned yet" : `ended up ${esc(b.title.toLowerCase())}`;
+    const sentence = b.type === "known" ? `${plural(e.ips, "address", "addresses")} from ${esc(a.title)} were stopped without trying any attack${e.requests ? ` (${plural(e.requests, "request")})` : ""}.`
+      : b.col === 1 ? `${plural(e.ips, "address", "addresses")} from ${esc(a.title)} tried ${esc(b.title)}${e.requests ? `, ${plural(e.requests, "time")} in all` : ""}.`
+      : a.type === "known" ? `${plural(e.ips, "address", "addresses")} known bad already ${did}.`
+      : `${plural(e.ips, "address", "addresses")} that tried ${esc(a.title)} ${did}.`;
     this.panel.innerHTML = `<div class="wf-p-head" style="--c:${this.edgeColor(e)}"><span class="wf-p-kind">Connection</span>
         <button type="button" class="wf-p-x" data-wfclose aria-label="Close">${ICON.close}</button>
         <h3 class="wf-p-path"><button type="button" data-wfnode="${esc(a.id)}">${esc(a.title)}</button>${ICON.arrow}<button type="button" data-wfnode="${esc(b.id)}">${esc(b.title)}</button></h3></div>
-      <div class="wf-p-stats"><div><b>${fmt(e.ips)}</b><span>addresses</span></div><div><b>${fmt(e.requests || 0)}</b><span>${b.col === 1 ? "tries" : "requests"}</span></div></div>
+      <div class="wf-p-stats"><div><b>${fmt(e.ips)}</b><span>addresses</span></div><div><b>${fmt(e.requests || 0)}</b><span>${b.col === 1 && b.type !== "known" ? "tries" : "requests"}</span></div></div>
       <p class="wf-p-note">${sentence}</p>
       <div class="wf-p-sec"><h4>Addresses <span class="wf-p-span">${esc(this.span)}</span></h4><div class="wf-ips"><p class="muted small"><span class="spin"></span> Finding them…</p></div></div>`;
     this.loadIps(e.key);

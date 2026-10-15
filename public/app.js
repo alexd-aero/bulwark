@@ -67,7 +67,7 @@ function alertBanner(alerts) {
 function renderOverview() {
   const o = S.ov;
   if (!o) { app.innerHTML = '<p class="muted"><span class="spin"></span> Loading…</p>'; return; }
-  const T = o.totals || {}, bad = (T.drop || 0) + (T.block || 0) + (T.ban || 0);
+  const T = o.totals || {}, bad = (T.drop || 0) + (T.block || 0) + (T.ban || 0) + (T.check || 0);
   const strict = o.strictUntil > Date.now();
   app.innerHTML = `
     <div class="head"><div><h1>Overview</h1><p>Every request through ${o.sensors.length ? o.sensors.map((s) => h(s.host || "a host")).join(", ") : "your hosts"} is checked in microseconds; what is slow happens here, behind it.</p></div>
@@ -76,18 +76,18 @@ function renderOverview() {
     ${!o.sensors.length ? `<div class="banner warn"><span class="pill warn">NO SENSOR</span><div class="grow">No host is connected yet. Install Bulwark in Aegis × Burrow (Burrow → Addons) and its guard connects here by itself.</div></div>` : ""}
     <div class="grid g4" style="margin-bottom:14px">
       <div class="card stat"><b>${fmtN(T.req || 0)}</b><span>requests</span><div class="sub">${fmtB(T.bytes || 0)} · ${fmtN(o.tops.seen)} addresses</div></div>
-      <div class="card stat ${bad ? "hot" : ""}"><b>${fmtN(bad)}</b><span>stopped</span><div class="sub">${fmtN(T.drop || 0)} payloads · ${fmtN(T.block || 0)} blocked · ${fmtN(T.ban || 0)} bans</div></div>
-      <div class="card stat"><b>${fmtN(o.bans)}</b><span>banned now</span><div class="sub">${fmtN(T.newIp || 0)} new addresses · ${fmtN((T.payload || 0) + (T.probe || 0))} attacks</div></div>
+      <div class="card stat ${bad ? "hot" : ""}"><b>${fmtN(bad)}</b><span>requests stopped</span><div class="sub">${fmtN(T.drop || 0)} payloads · ${fmtN(T.block || 0)} blocked · ${fmtN(T.ban || 0)} bans${T.check ? ` · ${fmtN(T.check)} held for a check` : ""}</div></div>
+      <div class="card stat"><b>${fmtN(o.bans)}</b><span>banned now</span><div class="sub">${fmtN(T.newIp || 0)} new addresses · ${fmtN((T.payload || 0) + (T.probe || 0))} attack requests from strangers</div></div>
       <div class="card stat ${strict ? "warm" : ""}"><b>${o.latency ? fmtN(o.latency.p95) + '<span class="faint" style="font-size:15px"> ms</span>' : "–"}</b><span>to categorize a new address <span class="faint">(p95)</span></span>
         <div class="sub">${o.latency ? `median ${o.latency.p50} ms · ` : ""}${fmtN(o.stats.checked)} looked up${strict ? " · STRICT" : ""}</div></div>
     </div>
     <section class="card" style="margin-bottom:14px"><h3>Traffic <span class="faint">by what happened</span></h3><div id="cTraffic"></div>
-      <div class="legend"><span><i style="background:#3d4450"></i>through</span><span><i style="background:#f2b53c"></i>payload dropped</span><span><i style="background:#ff5a52"></i>blocked</span><span><i style="background:#e040fb"></i>banned</span><span><i style="background:#46c2ff"></i>new addresses (right axis)</span></div></section>
+      <div class="legend"><span><i style="background:#3d4450"></i>through</span><span><i style="background:#f2b53c"></i>payload dropped</span><span><i style="background:#ff5a52"></i>blocked</span><span><i style="background:#e040fb"></i>banned</span><span><i style="background:#7aa7ff"></i>held for a check</span><span><i style="background:#46c2ff"></i>new addresses (right axis)</span></div></section>
     <section class="card" style="margin-bottom:14px"><h3>Attack patterns <span class="faint">over time</span></h3><div id="cHeat"></div></section>
     <div class="grid g3" style="margin-bottom:14px">
-      <section class="card"><h3>Patterns</h3>${o.tops.sigs.length ? bars(o.tops.sigs, (r) => h(r.name), (r) => r.n, (r) => "s" + r.score) : '<p class="empty">No attacks in this window.</p>'}</section>
-      <section class="card"><h3>Networks <span class="faint">(strangers)</span></h3>${o.tops.orgs.length ? bars(o.tops.orgs, (r) => `${h(r.org)} <span class="faint mono">AS${r.asn}</span>${r.dc ? ' <span class="pill dc">hosting</span>' : ""}`, (r) => r.n, (r) => (r.dc ? "dc" : "")) : '<p class="empty">–</p>'}</section>
-      <section class="card"><h3>Countries</h3>${o.tops.countries.length ? bars(o.tops.countries, (r) => `${flag(r.cc)} ${h(r.cc)}`, (r) => r.n) : '<p class="empty">–</p>'}</section>
+      <section class="card"><h3>Patterns <span class="faint">(attack requests)</span></h3>${o.tops.sigs.length ? bars(o.tops.sigs, (r) => h(r.name), (r) => r.n, (r) => "s" + r.score) : '<p class="empty">No attacks in this window.</p>'}</section>
+      <section class="card"><h3>Networks <span class="faint">(strangers' requests)</span></h3>${o.tops.orgs.length ? bars(o.tops.orgs, (r) => `${h(r.org)} <span class="faint mono">AS${r.asn}</span>${r.dc ? ' <span class="pill dc">hosting</span>' : ""}`, (r) => r.n, (r) => (r.dc ? "dc" : "")) : '<p class="empty">–</p>'}</section>
+      <section class="card"><h3>Countries <span class="faint">(strangers' addresses)</span></h3>${o.tops.countries.length ? bars(o.tops.countries, (r) => `${flag(r.cc)} ${h(r.cc)}`, (r) => r.n) : '<p class="empty">–</p>'}</section>
     </div>
     <div class="grid g21">
       <section class="card"><h3>Busiest strangers</h3>${o.tops.ips.length ? `<div class="scroll"><table><thead><tr><th>Address</th><th>Network</th><th>Requests</th><th>Patterns</th><th></th></tr></thead><tbody>
@@ -95,7 +95,7 @@ function renderOverview() {
       <section class="card"><h3>What Bulwark did</h3>${o.actions.length ? `<div class="scroll" style="max-height:420px"><table><tbody>${o.actions.slice(0, 30).map((a) => `<tr class="click" data-act="ip" data-ip="${h(a.ip)}"><td class="faint mono">${ago(a.t)}</td><td><span class="pill ${a.act === "banned" ? "ban" : a.act === "lifted" || a.act === "unbanned" || a.act === "trusted" ? "ok" : ""}">${h(a.act)}</span></td><td>${ipBtn(a.ip, a.cc)}</td><td class="why" title="${h(a.why)}">${h(a.why)}</td></tr>`).join("")}</tbody></table></div>` : '<p class="empty">Quiet.</p>'}</section>
     </div>`;
   charts.traffic = new TimeChart($("#cTraffic"), { height: 300,
-    series: [{ key: "pass", label: "through", color: "#3d4450" }, { key: "drop", label: "payload dropped", color: "#f2b53c" }, { key: "block", label: "blocked", color: "#ff5a52" }, { key: "ban", label: "banned", color: "#e040fb" }],
+    series: [{ key: "pass", label: "through", color: "#3d4450" }, { key: "drop", label: "payload dropped", color: "#f2b53c" }, { key: "block", label: "blocked", color: "#ff5a52" }, { key: "ban", label: "banned", color: "#e040fb" }, { key: "check", label: "held for a check", color: "#7aa7ff" }],
     line: { key: "newIp", label: "new addresses", color: "#46c2ff" } });
   charts.traffic.set(S.series);
   const rows = (S.sigRows ||= null);
@@ -226,20 +226,21 @@ async function renderPatterns() {
       <div class="row"><span class="pill ${SEVP[w.sev] || ""}">${h(w.sev)}</span>${w.open ? '<span class="pill">ongoing</span>' : ""}<span class="spacer"></span><span class="faint small">${ago(w.last)}</span></div>
       <b>${h(w.title)}</b>
       <span class="muted small">${fmtN(w.members)} addresses · ${fmtN(w.banned)} banned${w.sigs.length ? ` · ${w.sigs.map(h).join(", ")}` : ""}</span></button>`;
-  $("#patBody").innerHTML = !T.ips ? '<div class="card empty-big"><b>Nothing attacked in this window.</b><span class="muted">Pick a longer one above.</span></div>' : `
+  $("#patBody").innerHTML = !T.ips ? '<div class="card empty-big"><b>Nothing hostile in this window.</b><span class="muted">Pick a longer one above.</span></div>' : `
     <div class="grid g5 pat-stats">
-      <div class="card stat"><b>${fmtN(T.ips)}</b><span>attacking addresses</span><div class="sub">${fmtN(T.requests)} attack requests</div></div>
+      <div class="card stat"><b>${fmtN(T.ips)}</b><span>hostile addresses</span><div class="sub">${fmtN(T.attacked ?? T.ips)} attacked${T.known ? ` · ${fmtN(T.known)} known bad, nothing tried` : ""}</div></div>
       <div class="card stat ${T.banned ? "hot" : ""}"><b>${fmtN(T.banned)}</b><span>banned</span><div class="sub">${pct(T.banned, T.ips)}% of them</div></div>
-      <div class="card stat"><b>${fmtN(T.sigs)}</b><span>patterns</span><div class="sub">${fmtN(d.sigs.filter((x) => x.score === 3).length)} payloads · ${fmtN(d.sigs.filter((x) => x.score !== 3).length)} probes</div></div>
+      <div class="card stat"><b>${fmtN(T.sigs)}</b><span>patterns</span><div class="sub">${fmtN(T.requests)} attack requests · ${fmtN(d.sigs.filter((x) => x.score === 3).length)} payloads · ${fmtN(d.sigs.filter((x) => x.score !== 3).length)} probes</div></div>
       <div class="card stat"><b>${fmtN(T.nets)}</b><span>networks</span><div class="sub">${fmtN(d.flow.nets.filter((n) => n.dc).length)} of the top ones are hosting</div></div>
       <div class="card stat ${T.campaigns ? "warm" : ""}"><b>${fmtN(T.campaigns)}</b><span>campaigns</span><div class="sub">many addresses, one playbook</div></div>
     </div>
     <section class="card flow-card">
       <div class="row flow-head"><div><h3>The attack workflow</h3><p class="muted small">Where attackers come from, what they tried, and what Bulwark did about it. A line's width is how many addresses took that path; the busiest are named, the rest folded into "other".</p></div>
-        <span class="spacer"></span><div class="flow-legend"><span><i style="background:var(--pass-hi)"></i>network</span><span><i style="background:var(--block)"></i>payload</span><span><i style="background:var(--drop)"></i>probe</span><span><i style="background:var(--ban)"></i>banned</span></div></div>
+        <span class="spacer"></span><div class="flow-legend"><span><i style="background:var(--pass-hi)"></i>network</span><span><i style="background:var(--block)"></i>payload</span><span><i style="background:var(--drop)"></i>probe</span><span><i style="background:var(--known)"></i>known bad</span><span><i style="background:var(--ban)"></i>banned</span></div></div>
       <div id="flow"></div></section>
     <div class="grid pat-two">
       <section class="card"><h3>Every pattern <span class="faint">${d.sigs.length}</span></h3>
+        ${!d.sigs.length ? `<p class="muted small">No attack patterns in this window${T.known ? `: the ${fmtN(T.known)} hostile ${T.known === 1 ? "address was" : "addresses were"} stopped for who ${T.known === 1 ? "it is" : "they are"} (a blocklist, the lookups or you) before trying anything` : ""}.</p>` : ""}
         <div class="scroll pat-table"><table><thead><tr><th>Pattern</th><th>Kind</th><th class="num">Addresses</th><th class="num">Requests</th><th class="num">Banned</th><th>Last</th></tr></thead>
           <tbody>${d.sigs.map(sigRow).join("")}</tbody></table></div></section>
       <section class="card"><h3>Campaigns <span class="faint">${d.waves.length}</span></h3>
