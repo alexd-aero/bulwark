@@ -16,7 +16,7 @@
     "title": "{name} {version}",
     "tagline": "Honest numbers: only strangers count as attacks, and nothing Bulwark stopped is left off the graph.",
     "highlights": [
-      "Addresses banned on a blocklist or by the lookups now show in Patterns (\"known bad, nothing tried\") instead of an empty graph",
+      "Patterns shows addresses banned on a blocklist or by lookups (\"known bad\"), not an empty graph",
       "Your own signed-in traffic is never counted as attacks (a .php page of yours was a \"probe\")",
       "Requests held for a check count as stopped, and get their own colour in the traffic chart",
       "Mass-scanner and attack-tool patterns now appear in \"Attack patterns over time\"",
