@@ -2,7 +2,7 @@
   "spec": 1,
   "id": "bulwark",
   "name": "Bulwark",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "A shield for everything you publish. Every request is checked in microseconds against 250k+ blocklisted addresses and known attack payloads; attackers are banned on every tunnel at once. Its own dashboard shows every request in full, warns about waves of attackers before they peak, graphs the patterns, keeps your blocklist and reports attackers to the vendors that missed them. On by default; no slower tunnels.",
   "author": "Alexd Aero",
   "license": "MIT",
@@ -14,13 +14,11 @@
     "style": "glow",
     "badge": "PROTECTION",
     "title": "{name} {version}",
-    "tagline": "Honest numbers: only strangers count as attacks, and nothing Bulwark stopped is left off the graph.",
+    "tagline": "No more false alarms on long links: ordinary traffic is no longer dropped as an attack.",
     "highlights": [
-      "Patterns shows addresses banned on a blocklist or by lookups (\"known bad\"), not an empty graph",
-      "Your own signed-in traffic is never counted as attacks (a .php page of yours was a \"probe\")",
-      "Requests held for a check count as stopped, and get their own colour in the traffic chart",
-      "Mass-scanner and attack-tool patterns now appear in \"Attack patterns over time\"",
-      "Each overview card says what it counts: requests or addresses"
+      "Long opaque links (signed or encrypted tokens) are no longer mistaken for attacks",
+      "A random token could spell a keyword like \"ognl\" and get the request dropped as code execution",
+      "Those false drops counted toward bans; real exploit paths are still caught as before"
     ],
     "button": "Update to {version}",
     "notes": "https://github.com/alexd-aero/bulwark/commits/main"

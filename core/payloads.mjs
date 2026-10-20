@@ -70,11 +70,19 @@ export function classify(path) {
   if (p === "/" || p.length < 3) return NONE;
   let d = p;
   if (p.includes("%")) { try { d = decodeURIComponent(p); } catch { /* bad escapes: test it as it is */ } }
+  // A segment that is one long opaque token (an id, a signed or encrypted link:
+  // 40+ of [A-Za-z0-9_-] and nothing else) is data. Exploits need punctuation, and
+  // a random token spells a short keyword (ognl, …) about once in 16 000 links,
+  // which dropped (and counted against) ordinary traffic.
+  const raw = p !== d;
+  const opaque = (x) => x.replace(/(^|\/)[A-Za-z0-9_-]{40,}(?=\/|\?|$)/g, "$1x");
+  d = opaque(d);
+  const pr = opaque(p);
   const q = d.indexOf("?"), bare = q < 0 ? d : d.slice(0, q);
-  const full = q >= 0, raw = p !== d;
+  const full = q >= 0;
   for (const s of SIGNATURES) {
     for (const re of s.res) {
-      if (re.test(bare) || (s.score === 3 && ((full && re.test(d)) || (raw && re.test(p))))) return s;
+      if (re.test(bare) || (s.score === 3 && ((full && re.test(d)) || (raw && re.test(pr))))) return s;
     }
   }
   return NONE;
