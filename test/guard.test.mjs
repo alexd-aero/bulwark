@@ -118,7 +118,7 @@ test("new patterns: phishing-kit hunters, edge exploits, cluster APIs, attack to
   assert.equal(classify("/api/v1/namespaces/default/secrets").id, "infra-api");
   assert.equal(classify("/index.php?s=/Index/\\think\\app/invokefunction").id, "rce");
   // a long opaque token is data: a random one spelling "ognl" must not be an attack
-  assert.equal(classify("/860562e15a39/XM2gw0AXCte9GoCAn3JmOGnLq8fHmUSvSetEfVGnceXtDEognlAbC").id, undefined);
+  assert.ok(!classify("/860562e15a39/XM2gw0AXCte9GoCAn3JmOGnLq8fHmUSvSetEfVGnceXtDEognlAbC").id);
   assert.equal(classify("/struts/ognl").id, "rce");
   assert.equal(classify("/phpinfo.php").id, "info-leak");
   assert.equal(g.gate("198.51.100.7", { path: "/", ua: "sqlmap/1.8#stable" }).status, 404, "an attack tool's request never reaches the app");
