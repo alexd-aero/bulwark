@@ -4,7 +4,7 @@
 //   Series    per-minute counts for 7 days, per-hour for 90: the charts
 //   Profiles  one record per address: when, how much, what it asked for, who holds it
 
-import { appendFile, readdirSync, unlinkSync, readFileSync, writeFileSync, renameSync, mkdirSync, createReadStream, existsSync } from "node:fs";
+import { appendFile, readdirSync, unlinkSync, readFileSync, writeFileSync, renameSync, mkdirSync, createReadStream, existsSync, statSync, openSync, readSync, closeSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
 
@@ -14,18 +14,30 @@ const atomicWrite = (file, obj) => { writeFileSync(file + ".tmp", JSON.stringify
 
 // ------------------------------------------------------------------ logs
 export class Logs {
-  constructor({ dir, keepDays = 30, ring = 50000 }) {
+  // maxBytes: all the day files together; dayBytes: one day. Past a day's
+  // budget only requests that did something (a payload, a probe, a block) are
+  // written (this.skipped counts the plain ones left out, this.lost what a
+  // stuck disk made us drop; both stay in memory's ring either way). When
+  // all of them pass maxBytes the oldest day goes, whatever keepDays says.
+  constructor({ dir, keepDays = 30, ring = 50000, maxBytes = 2e9, dayBytes = 256e6 }) {
     this.dir = dir; mkdirSync(dir, { recursive: true });
-    this.keepDays = keepDays; this.max = ring;
+    this.keepDays = keepDays; this.max = ring; this.maxBytes = maxBytes; this.dayBytes = dayBytes;
+    this.writing = false; this.lost = 0; this.skipped = 0; this.dayFile = null; this.daySize = 0;
     this.ring = []; this.seq = 0; this.pending = []; this.subs = new Set();
     this.timer = setInterval(() => this.flush(), 1000); this.timer.unref?.();
     this.loadToday();
   }
   file(t) { return join(this.dir, `${day(t)}.jsonl`); }
   loadToday() {
-    // the last day's lines come back into memory, so a restart keeps the recent past
+    // the last day's lines come back into memory, so a restart keeps the recent
+    // past - only its tail is read: a day of a big wave is gigabytes
     try {
-      const lines = readFileSync(this.file(Date.now()), "utf8").trim().split("\n").slice(-this.max);
+      const f = this.file(Date.now()), size = statSync(f).size, want = Math.min(size, 48e6);
+      const fd = openSync(f, "r"), b = Buffer.alloc(want);
+      try { readSync(fd, b, 0, want, size - want); } finally { closeSync(fd); }
+      let text = b.toString("utf8");
+      if (want < size) text = text.slice(text.indexOf("\n") + 1);          // the first line is cut
+      const lines = text.trim().split("\n").slice(-this.max);
       for (const l of lines) { try { const e = JSON.parse(l); this.ring.push(e); if (e.id > this.seq) this.seq = e.id; } catch { /* torn line */ } }
     } catch { /* nothing today */ }
   }
@@ -37,18 +49,40 @@ export class Logs {
     for (const fn of this.subs) { try { fn(e); } catch { /* a closed stream */ } }
     return e;
   }
+  // what a full day still writes: anything that was not a plain pass
+  static worth(e) { return !!e.sig || (e.dec && e.dec !== "pass" && e.dec !== "seen"); }
   flush() {
     if (!this.pending.length) return;
+    if (this.writing) {                                     // a slow disk: never more than one write in the air
+      if (this.pending.length > 100000) { const n = this.pending.length - 100000; this.pending.splice(0, n); this.lost += n; }
+      return;
+    }
     const byFile = new Map();
     for (const e of this.pending.splice(0)) {
       const f = this.file(e.t);
-      byFile.set(f, (byFile.get(f) || "") + JSON.stringify(e) + "\n");
+      if (f !== this.dayFile) { this.dayFile = f; try { this.daySize = statSync(f).size; } catch { this.daySize = 0; } }
+      if (this.daySize > this.dayBytes && !Logs.worth(e)) { this.skipped++; continue; }
+      const line = JSON.stringify(e) + "\n";
+      this.daySize += line.length;
+      byFile.set(f, (byFile.get(f) || "") + line);
     }
-    for (const [f, text] of byFile) appendFile(f, text, () => {});
+    const jobs = [...byFile];
+    if (!jobs.length) return;
+    this.writing = true;
+    let left = jobs.length;
+    for (const [f, text] of jobs) appendFile(f, text, () => { if (--left === 0) this.writing = false; });
   }
   prune() {
     const cut = day(Date.now() - this.keepDays * DAY);
     for (const f of readdirSync(this.dir)) if (/^\d{4}-\d{2}-\d{2}\.jsonl$/.test(f) && f.slice(0, 10) < cut) { try { unlinkSync(join(this.dir, f)); } catch { /* gone */ } }
+    // and the byte budget: oldest days first, never today
+    const files = this.days().map((d) => { const f = join(this.dir, `${d}.jsonl`); try { return { f, d, size: statSync(f).size }; } catch { return null; } }).filter(Boolean);
+    let total = files.reduce((n, x) => n + x.size, 0);
+    const today = day(Date.now());
+    for (const x of files) {
+      if (total <= this.maxBytes || x.d === today) break;
+      try { unlinkSync(x.f); total -= x.size; } catch { /* gone */ }
+    }
   }
   days() { return readdirSync(this.dir).filter((f) => /^\d{4}-\d{2}-\d{2}\.jsonl$/.test(f)).map((f) => f.slice(0, 10)).sort(); }
 

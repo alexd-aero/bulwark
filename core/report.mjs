@@ -130,8 +130,14 @@ export class Reporters {
   // ------------------------------------------------------------ alerts out
   async notify(alert, change) {
     const s = this.settings();
+    if (!s.ntfy && !s.webhook) return;
+    // a wave raises an alert per /24: at most 6 go out a minute (20 critical), the rest are counted into the next one
+    const now = Date.now();
+    if (now - (this.sentWindow || 0) > 60e3) { this.sentWindow = now; this.sentCount = 0; }
+    if (++this.sentCount > (alert.sev === "critical" ? 20 : 6)) { this.heldBack = (this.heldBack || 0) + 1; return; }
+    const held = this.heldBack || 0; this.heldBack = 0;
     const title = `Bulwark ${alert.sev === "critical" ? "CRITICAL" : alert.sev}: ${alert.title}`;
-    const text = `${alert.detail}${alert.members?.length ? `\n${alert.members.length} addresses: ${alert.members.slice(0, 8).join(", ")}${alert.members.length > 8 ? "…" : ""}` : ""}${alert.forecast ? `\nForecast: ~${alert.forecast.nextHour} more in the next hour (${alert.forecast.trend})` : ""}`;
+    const text = `${held ? `(${held} more alert${held === 1 ? "" : "s"} held back in the last minute - see the dashboard)\n` : ""}${alert.detail}${alert.members?.length ? `\n${alert.members.length} addresses: ${alert.members.slice(0, 8).join(", ")}${alert.members.length > 8 ? "…" : ""}` : ""}${alert.forecast ? `\nForecast: ~${alert.forecast.nextHour} more in the next hour (${alert.forecast.trend})` : ""}`;
     const jobs = [];
     if (s.ntfy && /^https:\/\//.test(s.ntfy) && alert.sev !== "info" && change !== "closed") {
       jobs.push(this.fetch(s.ntfy, { method: "POST", body: text, headers: { Title: title, Priority: alert.sev === "critical" ? "urgent" : "default", Tags: "shield" }, signal: AbortSignal.timeout(10000) }));

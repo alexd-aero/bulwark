@@ -38,15 +38,20 @@ import { Guard } from "./guard.mjs";
 let ctx = null, cfg = null, P = null, guardObj = null, sock = null, buf = "", queue = [], dropped = 0, pending = [];
 let flushTimer = null, devicesTimer = null, retryTimer = null, feedsWatch = null, feedsTimer = null, stopped = true, connectedAt = 0;
 const MAX_QUEUE = 5000;
+const MAX_BACKLOG = 4e6;        // bytes waiting on the socket: past this the app is not keeping up
 
 function log(...a) { ctx?.log?.(...a); }
+// Never let a slow app grow this process (the gate itself): what can't be
+// written soon is dropped and counted, the guard keeps deciding on its own.
+const backedUp = () => !!sock && sock.writableLength > MAX_BACKLOG;
 function send(msg) {
-  if (sock && !sock.destroyed && sock.writable) { sock.write(JSON.stringify(msg) + "\n"); return true; }
+  if (sock && !sock.destroyed && sock.writable && !backedUp()) { sock.write(JSON.stringify(msg) + "\n"); return true; }
   return false;
 }
 function flush() {
   if (!queue.length) return;
   if (send({ t: "ev", list: queue, dropped })) { queue = []; dropped = 0; }
+  else if (queue.length > MAX_QUEUE) { dropped += queue.length - MAX_QUEUE; queue.splice(0, queue.length - MAX_QUEUE); }
 }
 
 function connectApp() {
@@ -155,9 +160,9 @@ export function observe(ip, info, res) {
   if (!guardObj) return;
   try {
     const e = guardObj.entry(ip, info, res);
-    if (sock) queue.push(e);
-    else { queue.push(e); if (queue.length > MAX_QUEUE) { queue.shift(); dropped++; } }
+    queue.push(e);
     if (queue.length >= 500) flush();
+    if (queue.length > MAX_QUEUE) { queue.shift(); dropped++; }
   } catch { /* never in the way */ }
 }
 export function signedIn(ip) { guardObj?.trust(ip); }
@@ -168,6 +173,7 @@ export function scan(ip) {
   const a = guardObj.asked.get(ip) || 0;
   if (Date.now() - a < 10e3) return;
   guardObj.asked.set(ip, Date.now());
+  if (guardObj.asked.size > 20000) guardObj.asked.delete(guardObj.asked.keys().next().value);
   const m = { t: "scan", ip };
   if (!send(m) && pending.length < 2000) pending.push(m);
 }

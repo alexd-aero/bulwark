@@ -80,7 +80,7 @@ export class Brain {
     useLists((ip) => this.feeds.lookup(ip), (ip) => (this.feeds.lists.has("tor") ? this.feeds.lookup(ip).some((l) => l.id === "tor") : null), (ip) => this.asn.lookup(ip));
     this.sensors = new Set();
     this.own = new Set();
-    this.verdicts = new Map();      // ip -> {at, level, why, bad, benign, intel}
+    this.verdicts = new Map();      // ip -> {at, level, why, bad, benign}
     this.queued = new Map(); this.queue = []; this.running = 0; this.lat = [];
     this.strictUntil = 0;
     this.dirty = false; this.timers = [];
@@ -105,7 +105,7 @@ export class Brain {
     t(() => this.save(), 30e3);
     t(() => this.tick(), 30e3);
     t(() => { this.profiles.save(); this.series.save(); this.waves.save(); this.reporters.save(); }, 2 * MIN);
-    t(() => this.logs.prune(), 6 * HOUR);
+    t(() => this.logs.prune(), 10 * MIN);
     return this;
   }
   stop() {
@@ -120,7 +120,7 @@ export class Brain {
     for (const [ip, t] of Object.entries(this.state.trusted)) if (now - t > 30 * DAY) delete this.state.trusted[ip];
     for (const [ip, t] of Object.entries(this.state.cleared ||= {})) if (now - t > CLEARED_FOR) delete this.state.cleared[ip];
     this.state.actions = this.state.actions.slice(0, 500);
-    try { atomic(this.file, this.state); this.writeSnapshot(); this.dirty = false; } catch (e) { this.log("save:", e.message); }
+    try { atomic(this.file, this.state); if (force) { this.snapAt = 0; clearTimeout(this.snapTimer); this.snapTimer = null; } this.writeSnapshot(); this.dirty = false; } catch (e) { this.log("save:", e.message); }
   }
   get settings() { return this.state.settings; }
 
@@ -136,8 +136,28 @@ export class Brain {
       strictUntil: this.strictUntil,
     };
   }
-  writeSnapshot() { try { atomic(this.P.snapshot, this.snapshot()); } catch { /* next time */ } }
-  broadcast(m) { const line = JSON.stringify(m) + "\n"; for (const s of this.sensors) { try { s.write(line); } catch { /* gone */ } } }
+  // at most every 5 s: a ban wave would otherwise write megabytes to disk per ban
+  writeSnapshot() {
+    const due = (this.snapAt || 0) + 5000 - Date.now();
+    if (due > 0) { this.snapTimer ||= setTimeout(() => { this.snapTimer = null; this.writeSnapshot(); }, due); this.snapTimer.unref?.(); return; }
+    this.snapAt = Date.now();
+    try { atomic(this.P.snapshot, this.snapshot()); } catch { /* next time */ }
+  }
+  // A host that reads slower than we write (it is under a wave itself) is not
+  // buried in a backlog: past 8 MB waiting, messages are dropped, and once it
+  // has caught up it gets the whole state again.
+  broadcast(m) {
+    const line = JSON.stringify(m) + "\n";
+    for (const s of this.sensors) {
+      try {
+        if (s.writableLength > 8e6) {
+          if (!s.behind) { s.behind = true; s.once("drain", () => { s.behind = false; try { s.write(JSON.stringify({ t: "state", ...this.snapshot() }) + "\n"); } catch { /* gone */ } }); }
+          continue;
+        }
+        s.write(line);
+      } catch { /* gone */ }
+    }
+  }
   // one message from a guard
   onSensor(m, s) {
     switch (m.t) {
@@ -357,8 +377,9 @@ export class Brain {
       return;
     }
     if (this.offline && !this.remoteInjected) return;
-    if (this.queue.some((q) => q.ip === ip) || this.scanning?.has(ip)) return;
-    (this.scanning ||= new Set()).add(ip);
+    // a wave asks for tens of thousands of these: a Set, and a cap (the guard asks again in 10 s)
+    if ((this.scanning ||= new Set()).has(ip) || this.scanning.size >= 2000) return;
+    this.scanning.add(ip);
     this.queued.set(ip, { at: Date.now(), probe: false });
     this.queue.unshift({ ip, probe: false, first: true });
     this.pump();
@@ -375,7 +396,7 @@ export class Brain {
     const level = r.verdict.level, src = r.sources || {};
     const benign = !!src.greynoise?.result?.benign;
     const bad = (level === "malicious" || level === "suspicious") && !benign;
-    const v = { at: Date.now(), level, why: r.verdict.why, bad, benign, intel: r };
+    const v = { at: Date.now(), level, why: r.verdict.why, bad, benign };          // the full lookup stays in intel's cache, not here: 50 000 of them is a lot of memory
     this.verdicts.set(ip, v);
     if (this.verdicts.size > 50000) this.verdicts.delete(this.verdicts.keys().next().value);
     if (bad || benign) this.broadcast({ t: "verdict", ip, v: { bad, benign, level, why: v.why } });
@@ -393,7 +414,8 @@ export class Brain {
   // ------------------------------------------------------------ bans
   evidence(ip) {
     const lines = [], sigs = new Set();
-    for (let i = this.logs.ring.length - 1; i >= 0 && lines.length < 12; i--) {
+    const stop = Math.max(0, this.logs.ring.length - 5000);                  // the recent past only: bans come by the hundred in a wave
+    for (let i = this.logs.ring.length - 1; i >= stop && lines.length < 12; i--) {
       const e = this.logs.ring[i];
       if (e.ip !== ip || !e.sig) continue;
       lines.push(`${e.m} ${String(e.path).slice(0, 140)}`); sigs.add(e.sig);

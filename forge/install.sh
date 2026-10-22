@@ -25,6 +25,11 @@ ExecStart=$NODE --max-old-space-size=384 $APP/server.mjs
 Restart=always
 RestartSec=3
 Nice=5
+# whatever a wave does to it, it never takes the machine with it
+MemoryHigh=480M
+MemoryMax=640M
+CPUQuota=80%
+IOWeight=50
 
 [Install]
 WantedBy=default.target
