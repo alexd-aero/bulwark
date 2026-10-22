@@ -2,8 +2,8 @@
   "spec": 1,
   "id": "bulwark",
   "name": "Bulwark",
-  "version": "1.6.2",
-  "description": "A shield for everything you publish. Every request is checked in microseconds against 250k+ blocklisted addresses and known attack payloads; attackers are banned on every tunnel at once. Its own dashboard shows every request in full, warns about waves of attackers before they peak, graphs the patterns, keeps your blocklist and reports attackers to the vendors that missed them. On by default; no slower tunnels.",
+  "version": "1.7.0",
+  "description": "A shield for everything you publish. Every request is decoded and judged in microseconds by an attack engine with 21 categories and 44 known CVE exploits, scored CRS-style with per-address behaviour, and checked against 250k+ blocklisted addresses; attackers are banned on every tunnel at once. Its own dashboard shows every request in full, warns about waves, graphs the patterns, inspects any IP across a dozen free sources and reports attackers to the vendors that missed them.",
   "author": "Alexd Aero",
   "license": "MIT",
   "homepage": "https://github.com/alexd-aero/bulwark",
@@ -14,13 +14,13 @@
     "style": "glow",
     "badge": "PROTECTION",
     "title": "{name} {version}",
-    "tagline": "Holds up under a huge attack wave instead of taking the machine down with it.",
+    "tagline": "A stronger engine: every attack named and scored, encodings seen through, and an IP Inspector for any address.",
     "highlights": [
-      "The gate no longer piles up memory when the Bulwark app falls behind",
-      "Wave tracking stays fast with tens of thousands of attackers (was minutes of CPU)",
-      "Logs have a disk budget; a restart reads only the tail of a huge day",
-      "Fewer disk writes per ban, capped scan queue, at most 6 alerts out a minute",
-      "The service is capped at 640 MB and 80% CPU so the machine stays up"
+      "21 attack categories (SQLi, SSRF, RCE, web shells, IoT…) with MITRE, OWASP and 44 CVEs tagged",
+      "Sees through encoding tricks: double URL encoding, overlong UTF-8, %u, look-alikes, entities",
+      "SQLi and XSS judged by shape; hits add up CRS-style; probes count only if the app says 404",
+      "Catches wordlist scanning, credential stuffing and floods per address, in bounded memory",
+      "IP Inspector: RDAP, RIPEstat, Shodan, GreyNoise, OTX, DNSBLs and more, one scored report"
     ],
     "button": "Update to {version}",
     "notes": "https://github.com/alexd-aero/bulwark/commits/main"

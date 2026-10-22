@@ -1,0 +1,135 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400" viewBox="0 0 1200 400" role="img" aria-label="Bulwark: a request shield for self-hosted gateways">
+  <title>Bulwark</title>
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" fill="none" stroke="#ffffff" stroke-opacity=".045"/>
+    </pattern>
+    <radialGradient id="fade" cx=".22" cy=".45" r=".85">
+      <stop offset="0" stop-color="#fff"/><stop offset=".8" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+    <mask id="m"><rect width="1200" height="400" fill="url(#fade)"/></mask>
+    <radialGradient id="glowA" cx=".16" cy=".5" r=".45">
+      <stop offset="0" stop-color="#ff4b3a" stop-opacity=".30"/><stop offset="1" stop-color="#ff4b3a" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowB" cx=".95" cy="0" r=".55">
+      <stop offset="0" stop-color="#e5384f" stop-opacity=".16"/><stop offset="1" stop-color="#e5384f" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="shield" x1="10" y1="6" x2="54" y2="58" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff7a45"/><stop offset="1" stop-color="#e5384f"/>
+    </linearGradient>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1d1013"/><stop offset="1" stop-color="#0a0506"/>
+    </linearGradient>
+    <linearGradient id="ink" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#d9c9cb"/>
+    </linearGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff6a3d" stop-opacity="0"/><stop offset=".5" stop-color="#ff6a3d" stop-opacity=".7"/><stop offset="1" stop-color="#ff6a3d" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".055"/><stop offset="1" stop-color="#ffffff" stop-opacity=".015"/>
+    </linearGradient>
+    <linearGradient id="beam" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff6a3d" stop-opacity="0"/><stop offset=".85" stop-color="#ff6a3d" stop-opacity=".16"/><stop offset=".97" stop-color="#ffb199" stop-opacity=".35"/><stop offset="1" stop-color="#ff6a3d" stop-opacity="0"/>
+    </linearGradient>
+    <clipPath id="rows"><rect x="604" y="98" width="556" height="214" rx="12"/></clipPath>
+    <filter id="soft" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="10"/></filter>
+  </defs>
+
+  <rect width="1200" height="400" rx="22" fill="#060304"/>
+  <rect width="1200" height="400" rx="22" fill="url(#grid)" mask="url(#m)"/>
+  <rect width="1200" height="400" rx="22" fill="url(#glowA)"/>
+  <rect width="1200" height="400" rx="22" fill="url(#glowB)"/>
+  <rect x=".5" y=".5" width="1199" height="399" rx="21.5" fill="none" stroke="#ff8a6a" stroke-opacity=".14"/>
+  <path d="M260 .5h680" stroke="url(#edge)"/>
+
+  <!-- the shield, large, with its rings -->
+  <g transform="translate(150 160)" fill="none" stroke="#ff5a43">
+    <circle r="112" stroke-opacity=".10"/>
+    <circle r="146" stroke-opacity=".06" stroke-dasharray="2 7"/>
+    <circle r="180" stroke-opacity=".04"/>
+  </g>
+  <path d="M150 52 70 80v58c0 50 34 91 80 107 46-16 80-57 80-107V80l-80-28Z" fill="#ff4b3a" opacity=".35" filter="url(#soft)"/>
+  <g transform="translate(66 76)">
+    <rect width="168" height="168" rx="40" fill="url(#tile)"/>
+    <rect x=".5" y=".5" width="167" height="167" rx="39.5" fill="none" stroke="#ff8a6a" stroke-opacity=".22"/>
+    <path d="M46 1h76" stroke="#ffb199" stroke-opacity=".55"/>
+    <g transform="translate(20 18) scale(2)">
+      <path d="M32 4 9 12v17c0 14.6 9.7 26.6 23 31 13.3-4.4 23-16.4 23-31V12L32 4Z" fill="url(#shield)"/>
+      <path d="M20 22v8c0 8 5 14.6 12 17.4 7-2.8 12-9.4 12-17.4v-8" fill="none" stroke="#16080a" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" opacity=".88"/>
+      <path d="M20 22h5v4h4.7v-4h4.6v4H39v-4h5" fill="none" stroke="#16080a" stroke-width="3.2" stroke-linejoin="round" opacity=".88"/>
+    </g>
+  </g>
+
+  <!-- the name -->
+  <g font-family="Inter, 'Segoe UI', system-ui, -apple-system, sans-serif">
+    <text x="64" y="304" font-size="56" font-weight="800" letter-spacing="-2" fill="url(#ink)">Bulwark</text>
+    <text x="66" y="334" font-size="16.5" fill="#a39396">A shield for everything you publish from home.</text>
+    <text x="66" y="358" font-size="13.5" fill="#6f6366">Judged in microseconds. Banned everywhere at once.</text>
+  </g>
+
+  <!-- what the guard sees: requests, each with its verdict -->
+  <g font-family="'JetBrains Mono', 'SF Mono', 'DejaVu Sans Mono', Menlo, Consolas, monospace" font-size="13">
+    <text x="604" y="80" fill="#8a7b7e" font-size="11.5" letter-spacing="2">THE GUARD · EVERY REQUEST, BEFORE YOUR APP</text>
+    <circle cx="1150" cy="76" r="4" fill="#35d39a">
+      <animate attributeName="opacity" values="1;.25;1" dur="2.4s" repeatCount="indefinite"/>
+    </circle>
+    <text x="1138" y="80" fill="#35d39a" font-size="11.5" text-anchor="end" letter-spacing="1.5">LIVE</text>
+    <rect x="604" y="98" width="556" height="214" rx="12" fill="url(#panel)" stroke="#ffffff" stroke-opacity=".10"/>
+    <g clip-path="url(#rows)">
+      <rect x="560" y="98" width="110" height="214" fill="url(#beam)">
+        <animate attributeName="x" values="494;1164" dur="6s" repeatCount="indefinite"/>
+      </rect>
+    </g>
+
+    <g transform="translate(622 128)">
+      <text fill="#6f6366">GET</text><text x="40" fill="#e9e1e2">/.env</text>
+      <g transform="translate(330 -13)"><rect width="84" height="19" rx="9.5" fill="#ffb02e" fill-opacity=".12" stroke="#ffb02e" stroke-opacity=".5"/><circle cx="11" cy="9.5" r="3" fill="#ffb02e"/><text x="19" y="13.5" font-size="11" font-weight="700" fill="#ffb02e">secrets</text></g>
+      <text x="520" text-anchor="end" fill="#ffb02e" font-size="12">dropped</text>
+    </g>
+    <path d="M618 140h526" stroke="#ffffff" stroke-opacity=".06"/>
+    <g transform="translate(622 166)">
+      <text fill="#6f6366">GET</text><text x="40" fill="#e9e1e2">/item?id=1' OR '1'='1</text>
+      <g transform="translate(330 -13)"><rect width="62" height="19" rx="9.5" fill="#ff5fa2" fill-opacity=".12" stroke="#ff5fa2" stroke-opacity=".5"/><circle cx="11" cy="9.5" r="3" fill="#ff5fa2"/><text x="19" y="13.5" font-size="11" font-weight="700" fill="#ff5fa2">SQLi</text></g>
+      <text x="520" text-anchor="end" fill="#e040fb" font-size="12">banned</text>
+    </g>
+    <path d="M618 178h526" stroke="#ffffff" stroke-opacity=".06"/>
+    <g transform="translate(622 204)">
+      <text fill="#6f6366">GET</text><text x="40" fill="#e9e1e2">/?q=%252e%252e%252fetc</text>
+      <g transform="translate(330 -13)"><rect width="96" height="19" rx="9.5" fill="#ff8a3d" fill-opacity=".12" stroke="#ff8a3d" stroke-opacity=".5"/><circle cx="11" cy="9.5" r="3" fill="#ff8a3d"/><text x="19" y="13.5" font-size="11" font-weight="700" fill="#ff8a3d">traversal</text></g>
+      <text x="520" text-anchor="end" fill="#e040fb" font-size="12">banned</text>
+    </g>
+    <path d="M618 216h526" stroke="#ffffff" stroke-opacity=".06"/>
+    <g transform="translate(622 242)">
+      <text fill="#6f6366">GET</text><text x="40" fill="#e9e1e2">/?x=${${::-j}ndi:ldap://…}</text>
+      <g transform="translate(330 -13)"><rect width="62" height="19" rx="9.5" fill="#ff3d71" fill-opacity=".12" stroke="#ff3d71" stroke-opacity=".5"/><circle cx="11" cy="9.5" r="3" fill="#ff3d71"/><text x="19" y="13.5" font-size="11" font-weight="700" fill="#ff3d71">JNDI</text></g>
+      <text x="520" text-anchor="end" fill="#e040fb" font-size="12">banned</text>
+    </g>
+    <path d="M618 254h526" stroke="#ffffff" stroke-opacity=".06"/>
+    <g transform="translate(622 280)">
+      <text fill="#6f6366">GET</text><text x="40" fill="#e9e1e2">/assets/app.js</text>
+      <text x="330" fill="#5d6168" font-size="12">clean</text>
+      <text x="520" text-anchor="end" fill="#35d39a" font-size="12">through · 3 µs</text>
+    </g>
+  </g>
+
+  <!-- what it is made of -->
+  <g font-family="Inter, 'Segoe UI', system-ui, sans-serif" font-size="12.5">
+    <g transform="translate(604 334)">
+      <rect width="120" height="34" rx="10" fill="#ffffff" fill-opacity=".04" stroke="#ffffff" stroke-opacity=".10"/>
+      <text x="60" y="21.5" text-anchor="middle"><tspan fill="#f2e8e9" font-weight="700">21</tspan><tspan fill="#a39396"> categories</tspan></text>
+    </g>
+    <g transform="translate(734 334)">
+      <rect width="130" height="34" rx="10" fill="#ffffff" fill-opacity=".04" stroke="#ffffff" stroke-opacity=".10"/>
+      <text x="65" y="21.5" text-anchor="middle"><tspan fill="#f2e8e9" font-weight="700">44</tspan><tspan fill="#a39396"> CVEs tagged</tspan></text>
+    </g>
+    <g transform="translate(874 334)">
+      <rect width="146" height="34" rx="10" fill="#ffffff" fill-opacity=".04" stroke="#ffffff" stroke-opacity=".10"/>
+      <text x="73" y="21.5" text-anchor="middle"><tspan fill="#f2e8e9" font-weight="700">250k+</tspan><tspan fill="#a39396"> blocklisted</tspan></text>
+    </g>
+    <g transform="translate(1030 334)">
+      <rect width="130" height="34" rx="10" fill="#ff6a3d" fill-opacity=".10" stroke="#ff6a3d" stroke-opacity=".35"/>
+      <text x="65" y="21.5" text-anchor="middle" fill="#ffb199" font-weight="700">IP Inspector</text>
+    </g>
+  </g>
+</svg>

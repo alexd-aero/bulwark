@@ -1,7 +1,7 @@
 {
   "name": "bulwark",
-  "version": "1.6.2",
-  "description": "Bulwark: a shield for self-hosted gateways. Blocklists, payload detection and bans on every request in microseconds; full request logs, wave warnings, pattern graphs and vendor reporting in its own dashboard.",
+  "version": "1.7.0",
+  "description": "Bulwark: a request shield for self-hosted gateways. An attack engine with 21 categories and 44 CVE exploits that sees through encodings, behaviour scoring, blocklists and bans on every request in microseconds; full request logs, waves, pattern graphs, an IP Inspector and vendor reporting in its own dashboard.",
   "license": "MIT",
   "type": "module",
   "author": "Alexd Aero",
