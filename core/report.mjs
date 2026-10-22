@@ -14,21 +14,16 @@
 // Alerts: waves go to ntfy (a topic URL) and/or a webhook (JSON POST), if set.
 
 import { readFileSync, writeFileSync, renameSync } from "node:fs";
-import { signatureById } from "./payloads.mjs";
+import { categoryOf } from "./payloads.mjs";
+import { abuseCategories, categoryById } from "./taxonomy.mjs";
 
 const DAY = 86400e3;
-// AbuseIPDB categories (abuseipdb.com/categories)
-const CAT = { webapp: 21, hacking: 15, sqli: 16, bot: 19, brute: 18 };
-function categories(sigs) {
-  const c = new Set([CAT.webapp]);
-  for (const s of sigs) {
-    if (s === "sqli") c.add(CAT.sqli);
-    else if (["cmd-inject", "php-rce", "log4shell", "router", "traversal"].includes(s)) c.add(CAT.hacking);
-    else if (["wordpress", "db-admin", "vpn-panel"].includes(s)) c.add(CAT.brute);
-    else if (signatureById(s)?.score === 1) c.add(CAT.bot);
-  }
-  return [...c];
+// AbuseIPDB categories (abuseipdb.com/categories), from what the address did:
+// each signature's category maps to them (taxonomy.mjs)
+export function categories(sigs) {
+  return abuseCategories(sigs.map((s) => categoryOf(s)).filter(Boolean));
 }
+const catNames = (sigs) => [...new Set(sigs.map((s) => categoryById(categoryOf(s))?.name).filter(Boolean))].slice(0, 4);
 
 export class Reporters {
   constructor({ file, log, settings, fetchImpl }) {
@@ -91,7 +86,8 @@ export class Reporters {
     if (fresh && known.score >= 50) { this.note({ ip: ev.ip, vendor: "AbuseIPDB", ok: true, skipped: true, why: `already known (score ${known.score}, ${known.reports} reports)` }); return; }
     if (!this.budget("report")) throw new Error("daily report allowance used up");
     const lines = [...new Set(ev.lines || [])].slice(0, 6).map((l) => l.replace(/[\r\n]+/g, " ").slice(0, 150));
-    const comment = `Web attack seen by Bulwark: ${ev.reason.replace(/\b[\w.-]+\.(?:dev|com|net|org|io|top|app)\b/gi, "[host]")}. Requests: ${lines.join(" | ")}`.slice(0, 1000);
+    const kinds = catNames(ev.sigs || []);
+    const comment = `Web attack seen by Bulwark${kinds.length ? ` (${kinds.join(", ")})` : ""}: ${ev.reason.replace(/\b[\w.-]+\.(?:dev|com|net|org|io|top|app)\b/gi, "[host]")}. Requests: ${lines.join(" | ")}`.slice(0, 1000);
     const body = new URLSearchParams({ ip: ev.ip, categories: categories(ev.sigs || []).join(","), comment, timestamp: new Date(ev.last || Date.now()).toISOString() });
     const r = await this.fetch("https://api.abuseipdb.com/api/v2/report", { method: "POST", headers: { ...H, "Content-Type": "application/x-www-form-urlencoded" }, body, signal: AbortSignal.timeout(15000) });
     this.state.used.report++;

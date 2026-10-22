@@ -3,8 +3,9 @@
 //
 //   guard(ip, info)          every request, before anything else: the Guard's
 //                            answer (null = through), synchronous, microseconds
-//   observe(ip, info, res)   when the response is done: one line for the log,
-//                            batched to the app every 250 ms (never awaited)
+//   observe(ip, info, res)   when the response is done: what the app answered
+//                            (the guard's behaviour signals), and one line for
+//                            the log, batched to the app every 250 ms (never awaited)
 //   signedIn(ip)             a sign-in: that address is yours
 //   edge() / edgeVersion()   who may pass (cleared and trusted addresses, banned
 //                            ones), for a relay in front: Aegis mirrors it to your
@@ -159,6 +160,7 @@ export function guard(ip, info) {
 export function observe(ip, info, res) {
   if (!guardObj) return;
   try {
+    guardObj.after(ip, info, res);                // what the app answered: probes, wordlist scanning, failed sign-ins
     const e = guardObj.entry(ip, info, res);
     queue.push(e);
     if (queue.length >= 500) flush();

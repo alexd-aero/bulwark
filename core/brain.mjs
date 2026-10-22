@@ -29,13 +29,23 @@ import { Asn } from "./asn.mjs";
 import { Logs, Series, Profiles } from "./store.mjs";
 import { Waves } from "./waves.mjs";
 import { Reporters } from "./report.mjs";
-import { classifyRequest, SIGNATURES_VERSION } from "./payloads.mjs";
+import { inspect, categoryOf, SIGNATURES_VERSION } from "./payloads.mjs";
 import { checkIp, useLists } from "./intel.mjs";
 import { paths } from "./config.mjs";
 
 const MIN = 60e3, HOUR = 60 * MIN, DAY = 24 * HOUR;
 export const CLEARED_FOR = 7 * DAY;     // a clean scan lets an address into public tunnels for this long (the guard keeps the same)
 export const DEFAULT_SETTINGS = { auto: true, drop: true, lookups: true, scanFirst: true, report: true, abuseipdbKey: "", ntfy: "", webhook: "", keepDays: 30, strict: true, hostNotices: true };
+// what the engine found, on a log line (as the guard writes it)
+function label(e, sig) {
+  e.sig = sig.id; e.sc = sig.score;
+  if (sig.cat) e.cat = sig.cat;
+  if (sig.sev) e.sev = sig.sev;
+  if (sig.pts) e.pts = sig.pts;
+  if (sig.hits.length > 1) e.hits = sig.hits.slice(0, 8);
+  if (sig.cve) e.cve = sig.cve;
+  if (sig.det) e.det = String(sig.det).slice(0, 120);
+}
 const atomic = (file, obj) => { writeFileSync(file + ".tmp", JSON.stringify(obj)); renameSync(file + ".tmp", file); };
 
 // A ban's reason, for a notice row: the gate's sign-in detour undone (the path
@@ -229,12 +239,12 @@ export class Brain {
     if (H.seen.length > 12000) H.seen.splice(0, H.seen.length - 10000);
     fresh.sort((x, y) => x.t - y.t);
     for (const e of fresh) {
-      const sig = classifyRequest(e.path, e.ua);
-      if (sig.score) { e.sig = sig.id; e.sc = sig.score; }
+      const sig = inspect({ path: e.path, ua: e.ua || undefined, method: e.m || undefined });
+      if (sig.id) label(e, sig);
       const a = isIP(e.ip) ? this.asn.lookup(e.ip) : null;
       if (a) { e.asn = a.asn; e.org = a.name; if (a.hosting) e.dc = true; if (!e.cc) e.cc = a.cc; }
       this.profiles.add(e); this.logs.add(e);
-      if (sig.score && !sig.ua) {
+      if (sig.id && !sig.label) {
         const x = per.get(e.ip) || { score: 0, payloads: 0, paths: [], host: e.host, cc: e.cc };
         x.score += sig.score; if (sig.score === 3) x.payloads++; if (x.paths.length < 3 && !x.paths.includes(e.path)) x.paths.push(e.path.slice(0, 80));
         per.set(e.ip, x);
@@ -269,11 +279,12 @@ export class Brain {
     let marked = 0;
     for (const e of this.logs.ring) {
       if (e.sig || e.dec !== "pass" && e.dec !== "seen" || e.auth || e.local || e.own) continue;
-      const sig = classifyRequest(e.path, e.ua);
-      if (!sig.score) continue;
-      e.sig = sig.id; e.sc = sig.score; marked++;
-      const p = this.profiles.get(e.ip); if (p) p.sigs[sig.id] = (p.sigs[sig.id] || 0) + 1;
-      if (sig.ua) continue;
+      const sig = inspect({ path: e.path, ua: e.ua || undefined, method: e.m || undefined });
+      if (!sig.id || sig.probe && e.st >= 200 && e.st < 400) continue;      // a probe the app answered: it was here
+      label(e, sig); marked++;
+      const p = this.profiles.get(e.ip);
+      if (p) { p.sigs[sig.id] = (p.sigs[sig.id] || 0) + 1; if (sig.cat) (p.cats ||= {})[sig.cat] = (p.cats[sig.cat] || 0) + 1; }
+      if (sig.label) continue;
       const x = per.get(e.ip) || { score: 0, payloads: 0, paths: [], host: e.host, cc: e.cc };
       x.score += sig.score; if (sig.score === 3) x.payloads++; if (x.paths.length < 3 && !x.paths.includes(e.path)) x.paths.push(String(e.path).slice(0, 80));
       per.set(e.ip, x);
@@ -318,6 +329,7 @@ export class Brain {
   isTrusted(ip) { const t = this.state.trusted[ip]; return !!t && Date.now() - t < 30 * DAY && !this.own.has(ip); }
   ingest(e) {
     e.ip = normIp(e.ip);
+    if (e.sig && !e.cat) { const c = categoryOf(e.sig); if (c) e.cat = c; }      // an older guard: the category from the signature
     const a = isIP(e.ip) && !e.local ? this.asn.lookup(e.ip) : null;
     if (a) { e.asn = a.asn; e.org = a.name; if (a.hosting) e.dc = true; if (!e.cc) e.cc = a.cc; }
     const mine = !!(e.local || e.auth || this.isTrusted(e.ip) || this.state.allow[e.ip]);

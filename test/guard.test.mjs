@@ -116,7 +116,7 @@ test("new patterns: phishing-kit hunters, edge exploits, cluster APIs, attack to
   assert.equal(classify("/static/style/sys_files/index.js").id, "phish-kit");
   assert.equal(classify("/remote/fgt_lang?lang=/../../../..//////////dev/").score, 3);
   assert.equal(classify("/api/v1/namespaces/default/secrets").id, "infra-api");
-  assert.equal(classify("/index.php?s=/Index/\\think\\app/invokefunction").id, "rce");
+  assert.equal(classify("/index.php?s=/Index/\\think\\app/invokefunction").id, "thinkphp-rce");
   // a long opaque token is data: a random one spelling "ognl" must not be an attack
   assert.ok(!classify("/860562e15a39/XM2gw0AXCte9GoCAn3JmOGnLq8fHmUSvSetEfVGnceXtDEognlAbC").id);
   assert.equal(classify("/struts/ognl").id, "rce");

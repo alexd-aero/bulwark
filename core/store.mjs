@@ -7,6 +7,7 @@
 import { appendFile, readdirSync, unlinkSync, readFileSync, writeFileSync, renameSync, mkdirSync, createReadStream, existsSync, statSync, openSync, readSync, closeSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
+import { categoryOf } from "./payloads.mjs";
 
 const MIN = 60e3, HOUR = 60 * MIN, DAY = 24 * HOUR;
 const day = (t) => new Date(t).toISOString().slice(0, 10);
@@ -92,6 +93,9 @@ export class Logs {
     if (f.host && e.host !== f.host) return false;
     if (f.dec && (f.dec === "bad" ? e.dec === "pass" || (e.dec === "seen" && !e.sig) : e.dec !== f.dec)) return false;
     if (f.sig && (f.sig === "any" ? !e.sig : e.sig !== f.sig)) return false;
+    if (f.cat && (e.cat || categoryOf(e.sig)) !== f.cat) return false;
+    if (f.sev && e.sev !== f.sev) return false;
+    if (f.cve && !(e.cve && (f.cve === "any" || e.cve === f.cve))) return false;
     if (f.cc && e.cc !== f.cc) return false;
     if (f.st && String(e.st)[0] !== String(f.st)[0]) return false;
     if (f.asn && e.asn !== Number(f.asn)) return false;
@@ -130,7 +134,7 @@ export class Logs {
 }
 
 // ------------------------------------------------------------------ series
-const blank = () => ({ req: 0, pass: 0, drop: 0, block: 0, ban: 0, check: 0, newIp: 0, probe: 0, payload: 0, bytes: 0, ips: 0, sig: {} });
+const blank = () => ({ req: 0, pass: 0, drop: 0, block: 0, ban: 0, check: 0, newIp: 0, probe: 0, payload: 0, bytes: 0, ips: 0, sig: {}, cat: {} });
 export class Series {
   constructor({ file }) {
     this.file = file;
@@ -151,6 +155,7 @@ export class Series {
       if (mine) continue;
       if (e.sc === 3) b.payload++; else if (e.sc === 1) b.probe++;
       if (e.sig) b.sig[e.sig] = (b.sig[e.sig] || 0) + 1;
+      if (e.cat) (b.cat ||= {})[e.cat] = (b.cat[e.cat] || 0) + 1;
     }
     let s = this.seen.get(k);
     if (!s) { s = new Set(); this.seen.set(k, s); for (const old of this.seen.keys()) if (old < k - 2) this.seen.delete(old); }
@@ -176,6 +181,7 @@ export class Series {
         if (!b) continue;
         for (const f of ["req", "pass", "drop", "block", "ban", "check", "newIp", "probe", "payload", "bytes", "ips"]) p[f] += b[f] || 0;
         for (const [sig, n] of Object.entries(b.sig || {})) p.sig[sig] = (p.sig[sig] || 0) + n;
+        for (const [c, n] of Object.entries(b.cat || {})) p.cat[c] = (p.cat[c] || 0) + n;
       }
       out.push(p);
     }
@@ -222,6 +228,8 @@ export class Profiles {
     if (e.cc) p.cc = e.cc;
     if (e.host) p.hosts[e.host] = (p.hosts[e.host] || 0) + 1;
     if (e.sig) { p.sigs[e.sig] = (p.sigs[e.sig] || 0) + 1; if (p.seq.length < 6 && p.seq[p.seq.length - 1] !== e.sig) p.seq.push(e.sig); }
+    if (e.cat) (p.cats ||= {})[e.cat] = (p.cats[e.cat] || 0) + 1;
+    if (e.cve && !(p.cves ||= []).includes(e.cve) && p.cves.length < 12) p.cves.push(e.cve);
     if (e.ua && !p.uas.includes(e.ua)) { p.uas.push(e.ua); if (p.uas.length > 5) p.uas.shift(); }
     const path = String(e.path).slice(0, 200);
     if (!p.paths.includes(path)) { p.paths.push(path); if (p.paths.length > 25) p.paths.shift(); }
