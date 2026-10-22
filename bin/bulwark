@@ -4,6 +4,7 @@
 #   bulwark url               the dashboard's address, with its key
 #   bulwark ban IP [why]      bulwark unban IP      bulwark allow IP
 #   bulwark check IP          everything about an address
+#   bulwark inspect IP        the IP Inspector: every source, a scored verdict
 #   bulwark log [-f]          the latest requests (-f: follow)
 set -uo pipefail
 . "$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)/forge/lib.sh"
@@ -32,11 +33,20 @@ case "${1:-status}" in
       console.log("  lists: " + (d.lists.map((l) => l.name).join(", ") || "none"));
       console.log("  vendors: " + d.coverage.map((c) => `${c.vendor} ${c.knows ? "✓" : "✗"}`).join("  "));
       if (d.profile) console.log(`  here: ${d.profile.n} requests since ${new Date(d.profile.first).toLocaleString()}, patterns: ${Object.keys(d.profile.sigs).join(", ") || "none"}`);' ;;
+  inspect) [ -n "${2:-}" ] || { echo "bulwark inspect IP"; exit 1; }
+    call GET "/inspect/$2?wait=8000" | show '
+      const s = d.summary;
+      console.log(`${d.ip}  ${s.level.toUpperCase()}  risk ${s.score}/100  ${s.asn ? "AS" + s.asn + " " + (s.asName || "") : ""}  ${[s.city, s.country].filter(Boolean).join(", ")}`);
+      if (s.hostname) console.log("  " + s.hostname);
+      for (const w of s.why) console.log(`  ${(w.w > 0 ? "+" : "") + w.w}`.padEnd(7) + w.text + `  [${w.source}]`);
+      if (s.abuse.length) console.log("  abuse: " + s.abuse.join(", "));
+      console.log("  sources: " + Object.values(d.sources).map((x) => `${x.name} ${x.state === "ok" ? "✓" : x.state}`).join(" · "));
+      if (d.running) console.log("  (still asking: run it again in a moment)");' ;;
   log)
     if [ "${2:-}" = -f ]; then
       curl -fsSN -H "x-bulwark-key: $KEY" "$BASE/stream" | while IFS= read -r line; do
         case "$line" in data:*) printf '%s\n' "${line#data: }" | show 'if (d.ip) console.log(`${new Date(d.t).toLocaleTimeString()}  ${d.dec.padEnd(5)} ${d.ip.padEnd(16)} ${d.m} ${d.host || ""}${d.path}  ${d.st || ""}${d.why ? "  · " + d.why : ""}`)';; esac
       done
     else call GET "/logs?limit=40" | show 'for (const e of d.logs.reverse()) console.log(`${new Date(e.t).toLocaleTimeString()}  ${e.dec.padEnd(5)} ${e.ip.padEnd(16)} ${e.m} ${e.host || ""}${e.path}  ${e.st || ""}${e.why ? "  · " + e.why : ""}`)'; fi ;;
-  *) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' ;;
 esac

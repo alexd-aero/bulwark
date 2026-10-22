@@ -40,8 +40,8 @@ const GROUP_LABEL = { payload: "payloads · dropped on sight", probe: "probes ·
 const STAGES = [["Where they come from", "networks"], ["What they tried", "attack patterns"], ["What Bulwark did", "the outcome"]];
 
 export class Workflow {
-  constructor(el, { who, onIp, onLog, span = "" } = {}) {
-    this.el = el; this.who = who; this.onIp = onIp; this.onLog = onLog; this.span = span;
+  constructor(el, { who, onIp, onLog, span = "", cat = () => null } = {}) {
+    this.el = el; this.who = who; this.onIp = onIp; this.onLog = onLog; this.span = span; this.cat = cat;
     this.view = { x: 0, y: 0, k: 1 };
     this.sel = null;                     // {node: id} | {edge: key}
     this.moved = new Map();              // cards you dragged: id -> {x, y}
@@ -139,7 +139,7 @@ export class Workflow {
     const ban = k !== "out" && n.ips ? n.banned / n.ips : null;
     const stats = k === "out" ? `<span><b>${fmt(n.ips)}</b> ${n.ips === 1 ? "address" : "addresses"}</span>`
       : k === "net" ? `<span><b>${fmt(n.ips)}</b> addr</span>${n.banned ? `<span class="wf-banned"><b>${fmt(n.banned)}</b> banned</span>` : ""}${n.other ? `<span>${fmt(n.count)} nets</span>` : n.dc ? '<span class="wf-tag">hosting</span>' : ""}`
-      : `<span><b>${fmt(n.ips)}</b> addr</span>${n.requests ? `<span><b>${fmt(n.requests)}</b> ${k === "known" ? "req" : "tries"}</span>` : ""}${n.banned ? `<span class="wf-banned"><b>${fmt(n.banned)}</b> banned</span>` : ""}`;
+      : `${n.cat && this.cat(n.cat) ? `<span class="wf-cat" style="--k:${esc(this.cat(n.cat).color)}">${esc(this.cat(n.cat).short)}</span>` : ""}<span><b>${fmt(n.ips)}</b> addr</span>${n.requests && !(n.cat && this.cat(n.cat)) ? `<span><b>${fmt(n.requests)}</b> ${k === "known" ? "req" : "tries"}</span>` : ""}${n.banned ? `<span class="wf-banned"><b>${fmt(n.banned)}</b> banned</span>` : ""}`;
     return `<div class="wf-node ${k}${other}" data-id="${esc(n.id)}" tabindex="0" role="button" aria-label="${esc(n.title)}: ${n.ips} addresses" style="left:${n.x}px;top:${n.y}px;--c:${COLORS[k === "out" ? n.id : k]}">
       ${n.col > 0 ? '<i class="wf-port in"></i>' : ""}${n.col < 2 ? '<i class="wf-port out"></i>' : ""}
       <span class="wf-ic">${icon}</span>
@@ -257,6 +257,9 @@ export class Workflow {
     const what = n.type === "payload" ? "Requests after secrets or a way in. Nobody needs these, so every one is dropped, and an address that sends them is banned."
       : n.type === "probe" ? "Requests for software that isn't here (an admin page, a CMS). Counted and answered normally; with bad reputation they lead to a ban."
       : n.type === "out" || n.type === "known" ? n.what : n.other ? "The quieter networks, folded into one card so the busy ones stay readable." : `The addresses below belong to ${esc(n.org)}${n.asn ? ` (AS${n.asn})` : ""}.${n.dc ? " A hosting network: rented servers, rarely a person at home." : ""}`;
+    const c = n.cat ? this.cat(n.cat) : null;
+    const tax = c ? `<div class="wf-p-tax"><span class="wf-cat" style="--k:${esc(c.color)}">${esc(c.name)}</span>${n.sev ? `<span class="sev sev-${esc(n.sev)}">${esc(n.sev)}</span>` : ""}${n.cve ? `<a class="cve" href="https://nvd.nist.gov/vuln/detail/${esc(n.cve)}" target="_blank" rel="noopener noreferrer">${esc(n.cve)}</a>` : ""}
+      ${c.mitre?.length ? `<span class="faint small">ATT&amp;CK ${c.mitre.map(esc).join(", ")}${c.owasp ? ` · OWASP ${esc(c.owasp)}` : ""}</span>` : ""}</div>` : "";
     const ex = (n.examples || []).length ? `<div class="wf-p-sec"><h4>What it looks like</h4><div class="wf-ex">${n.examples.map((p) => `<code>${esc(p)}</code>`).join("")}</div></div>` : "";
     const sections = [
       ins.length ? `<div class="wf-p-sec"><h4>${n.type === "out" ? "After trying" : "Came from"}</h4>${this.conns(ins, "in")}</div>` : "",
@@ -266,7 +269,7 @@ export class Workflow {
     this.panel.innerHTML = `<div class="wf-p-head" style="--c:${COLORS[n.type === "out" ? n.id : n.type]}"><span class="wf-p-kind">${kind}</span>
         <button type="button" class="wf-p-x" data-wfclose aria-label="Close">${ICON.close}</button><h3>${esc(n.title)}</h3></div>
       <div class="wf-p-stats"><div><b>${fmt(n.ips)}</b><span>addresses</span></div>${n.type !== "out" ? `<div><b>${fmt(n.banned || 0)}</b><span>banned</span></div>` : ""}<div><b>${fmt(n.requests || 0)}</b><span>${n.type === "payload" || n.type === "probe" ? "tries" : "requests"}</span></div></div>
-      <p class="wf-p-note">${what}</p>${ex}${sections}
+      ${tax}<p class="wf-p-note">${what}${c?.about ? ` <span class="faint">${esc(c.about)}</span>` : ""}</p>${ex}${sections}
       <div class="wf-p-sec"><h4>Addresses <span class="wf-p-span">${esc(this.span)}</span></h4><div class="wf-ips"><p class="muted small"><span class="spin"></span> Finding them…</p></div>${log}</div>`;
     this.loadIps(n.id);
   }

@@ -123,11 +123,14 @@ export class Heatmap {
     const pts = this.data.points, n = pts.length, cw = (w - g.L - 6) / n;
     let max = 1;
     for (const p of pts) for (const r of this.rows) max = Math.max(max, p.sig[r.id] || 0);
-    ctx.font = "12px Inter, system-ui, sans-serif"; ctx.textBaseline = "middle";
+    ctx.font = `${w < 500 ? 11 : 12}px Inter, system-ui, sans-serif`; ctx.textBaseline = "middle";
     this.rows.forEach((r, j) => {
       const y = g.T + j * g.rh;
       ctx.fillStyle = r.score === 3 ? "#ff8a84" : "#f2c46b"; ctx.textAlign = "right";
-      ctx.fillText(r.name.length > 30 ? r.name.slice(0, 29) + "…" : r.name, g.L - 10, y + g.rh / 2);
+      // a long name is cut to what fits beside the grid (phones too)
+      let label = r.name;
+      while (label.length > 4 && ctx.measureText(label).width > g.L - 14) label = label.slice(0, -2).trimEnd() + "…";
+      ctx.fillText(label, g.L - 10, y + g.rh / 2);
       for (let i = 0; i < n; i++) {
         const v = pts[i].sig[r.id] || 0;
         ctx.fillStyle = v ? (r.score === 3 ? `rgba(255,90,82,${0.18 + 0.82 * Math.sqrt(v / max)})` : `rgba(242,181,60,${0.15 + 0.85 * Math.sqrt(v / max)})`) : "rgba(255,255,255,.025)";

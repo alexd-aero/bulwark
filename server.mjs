@@ -12,7 +12,8 @@
 //
 // API: GET overview | series?span= | logs?… | stream (SSE) | ip/IP | alerts |
 // graph?span= | blocklist | blocklist.txt?format=txt|cidr|nginx|iptables|csv|json |
-// lists | vendors | settings | status;  POST ip/IP/{ban,unban,allow,disallow,report} |
+// lists | vendors | settings | status | inspect/IP[?fresh=1&wait=ms] | inspect/IP/export;
+// POST ip/IP/{ban,unban,allow,disallow,report} |
 // lists/refresh | alerts/close;  PUT settings
 
 import { createServer } from "node:http";
@@ -25,7 +26,9 @@ import { loadConfig } from "./core/config.mjs";
 import { Brain, DEFAULT_SETTINGS } from "./core/brain.mjs";
 import { checkIp } from "./core/intel.mjs";
 import { isIP, isPrivate, normIp, netOf } from "./core/net.mjs";
-import { signatureById, SIGNATURES, UA_SIGNATURES, classify } from "./core/payloads.mjs";
+import { signatureById, categoryOf, catalog, classify, matcherStats } from "./core/payloads.mjs";
+import { CATEGORIES, categoryById } from "./core/taxonomy.mjs";
+import { Inspector, SOURCES as INSPECT_SOURCES } from "./core/inspect.mjs";
 
 const APP = dirname(fileURLToPath(import.meta.url));
 const VERSION = JSON.parse(readFileSync(join(APP, "package.json"), "utf8")).version;
@@ -33,9 +36,11 @@ const MIN = 60e3, HOUR = 60 * MIN, DAY = 24 * HOUR;
 const SPANS = { "15m": 15 * MIN, "1h": HOUR, "6h": 6 * HOUR, "24h": DAY, "7d": 7 * DAY, "30d": 30 * DAY, "90d": 90 * DAY };
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 
-export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", offline = false, remote, fetchImpl, quiet = false } = {}) {
+export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", offline = false, remote, fetchImpl, quiet = false, inspectFetch, inspectDns } = {}) {
   const say = quiet ? () => {} : log;
   const brain = new Brain({ home, log: say, offline, remote, fetchImpl }).start();
+  // the IP Inspector: on demand only, from the dashboard
+  const inspector = new Inspector({ brain, fetchImpl: inspectFetch || fetchImpl, dns: inspectDns, offline: offline && !inspectFetch });
   const keyHash = createHash("sha256").update(String(key)).digest();
   const okKey = (k) => !!k && timingSafeEqual(createHash("sha256").update(String(k)).digest(), keyHash);
   const cookie = (req) => /(?:^|;\s*)bulwark_k=([^;]+)/.exec(req.headers.cookie || "")?.[1];
@@ -87,6 +92,9 @@ export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", 
       logs: await brain.logs.query({ ip, limit: 300 }),
     };
   };
+  // an address's attack categories (requests per category), from its patterns
+  const catsOf = (p) => { const m = new Map(); for (const [sig, n] of Object.entries(p.sigs || {})) { const c = categoryOf(sig); if (c && signatureById(sig)?.sev !== "info") m.set(c, (m.get(c) || 0) + n); } return [...m]; };
+  const sigMeta = (sig) => { const d = signatureById(sig); return { cat: d?.cat || null, sev: d?.sev || null, cve: d?.cve || null }; };
   // yours (signed in, trusted, allowed, this machine, local) are never "strangers"
   const mine = (p) => p.auth || isPrivate(p.ip) || brain.own.has(p.ip) || brain.isTrusted(p.ip) || !!brain.state.allow[p.ip];
   const tops = (since) => {
@@ -94,9 +102,10 @@ export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", 
     const by = (fn) => { const m = new Map(); for (const p of ips) for (const [k, n] of fn(p)) m.set(k, (m.get(k) || 0) + n); return [...m].sort((a, b) => b[1] - a[1]); };
     return {
       ips: ips.filter((p) => !p.auth).sort((a, b) => b.n - a.n).slice(0, 15).map((p) => ({ ip: p.ip, n: p.n, cc: p.cc, org: p.org, dc: p.dc, banned: !!brain.state.bans[p.ip], sigs: Object.keys(p.sigs).length })),
-      sigs: by((p) => Object.entries(p.sigs)).slice(0, 12).map(([id, n]) => ({ id, name: signatureById(id)?.name || id, score: signatureById(id)?.score || 0, n })),
+      sigs: by((p) => Object.entries(p.sigs)).slice(0, 12).map(([id, n]) => ({ id, name: signatureById(id)?.name || id, score: signatureById(id)?.score || 0, ...sigMeta(id), n })),
       orgs: by((p) => (p.org && !p.auth ? [[`${p.asn}|${p.org}|${p.dc ? 1 : 0}`, p.n]] : [])).slice(0, 10).map(([k, n]) => { const [asn, org, dc] = k.split("|"); return { asn: Number(asn), org, dc: dc === "1", n }; }),
       countries: by((p) => (p.cc && !p.auth ? [[p.cc, 1]] : [])).slice(0, 12).map(([cc, n]) => ({ cc, n })),
+      cats: by((p) => catsOf(p)).slice(0, 12).map(([id, n]) => ({ id, n, name: categoryById(id)?.name || id, color: categoryById(id)?.color || null })),
       hosts: by((p) => Object.entries(p.hosts)).slice(0, 10).map(([host, n]) => ({ host, n })),
       seen: all.length,
     };
@@ -140,7 +149,7 @@ export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", 
       n.ips++; n.banned += banned; n.requests += p.n || 0; nets.set(nk, n);
       for (const [sig, k] of Object.entries(p.sigs)) {
         const def = signatureById(sig);
-        const x = sigs.get(sig) || { id: `sig:${sig}`, sig, name: def?.name || sig, score: def?.score || 0, ips: 0, banned: 0, requests: 0, last: 0 };
+        const x = sigs.get(sig) || { id: `sig:${sig}`, sig, name: def?.name || sig, score: def?.score || 0, ...sigMeta(sig), ips: 0, banned: 0, requests: 0, last: 0 };
         x.ips++; x.banned += banned; x.requests += k; x.last = Math.max(x.last, p.last || 0); sigs.set(sig, x);
         const lk = `${nk}|${sig}`, l = links.get(lk) || { a: nk, b: `sig:${sig}`, ips: 0, requests: 0 };
         l.ips++; l.requests += k; links.set(lk, l);
@@ -204,7 +213,13 @@ export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", 
                banned: w.members.filter((ip) => brain.state.bans[ip]).length,
                sigs: [...tally].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([sig]) => signatureById(sig)?.name || sig) };
     });
+    // by category: addresses and requests, and how many of them are banned
+    const cats = new Map();
+    for (const p of ps) for (const [c, n] of catsOf(p)) { const x = cats.get(c) || { id: c, name: categoryById(c)?.name || c, color: categoryById(c)?.color || null, ips: 0, requests: 0, banned: 0, sigs: new Set() }; x.ips++; x.requests += n; x.banned += !!brain.state.bans[p.ip]; cats.set(c, x); }
+    for (const x of sigList) cats.get(x.cat)?.sigs.add(x.name);
+    const catList = [...cats.values()].sort((a, b) => b.ips - a.ips || b.requests - a.requests).map((x) => ({ ...x, sigs: [...x.sigs].slice(0, 6) }));
     return {
+      cats: catList,
       totals: { ips: ps.length, attacked: ps.length - known.ips, known: known.ips, banned: ps.filter((p) => brain.state.bans[p.ip]).length, sigs: sigs.size, nets: nets.size, campaigns: waves.length,
                 requests: [...sigs.values()].reduce((a, x) => a + x.requests, 0) },
       flow: { nets: flowNets, sigs: flowSigs, links: [...flowLinks.values()],
@@ -230,6 +245,7 @@ export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", 
   const picker = (all, id) => {
     let pick;
     if (id.startsWith("out:")) return (p) => outcomeOf(p) === id;
+    if (id.startsWith("cat:")) { const c = id.slice(4); return (p) => catsOf(p).some(([x]) => x === c); }
     if (id.startsWith("wave:")) { const w = brain.waves.list(50).find((x) => `wave:${x.key}` === id); const m = new Set(w?.members || []); pick = (p) => m.has(p.ip); }
     else if (id === "as:other") { const keep = new Set(all.flow.nets.filter((n) => !n.other).map((n) => n.id)); pick = (p) => !keep.has(netKey(p)); }
     else if (id.startsWith("as:")) pick = (p) => netKey(p) === id;
@@ -285,6 +301,24 @@ export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", 
       req.on("close", () => { offLog(); offAlert(); clearInterval(ping); });
       return;
     }
+    // the IP Inspector: starts (or reuses) a full scan, answers with what's known so far
+    const ins = /^\/inspect\/((?:[0-9a-fA-F.:]|%3[aA]){3,90})(\/export)?$/.exec(path);
+    if (ins && m === "GET") {
+      const ip = normIp(ins[1].replace(/%3a/gi, ":"));
+      if (!isIP(ip)) return send(res, 400, { error: "That isn't an IP address." });
+      const job = inspector.inspect(ip, { fresh: q.fresh === "1" && !ins[2] });
+      const wait = ins[2] ? 25000 : Math.min(8000, Number(q.wait) || 0);
+      if (wait && job.running) { let t; await Promise.race([job.done, new Promise((r) => { t = setTimeout(r, wait); })]); clearTimeout(t); }
+      if (!job.local) await job.done.catch(() => {});
+      const view = job.view();
+      if (ins[2]) {
+        res.setHeader("Content-Disposition", `attachment; filename="bulwark-inspect-${ip.replace(/[:]/g, "-")}.json"`);
+        return send(res, 200, JSON.stringify({ tool: `Bulwark ${VERSION} IP Inspector`, exported: new Date().toISOString(), ...view }, null, 2));
+      }
+      return send(res, 200, view);
+    }
+    if (path === "/inspect" && m === "GET") return send(res, 200, { sources: INSPECT_SOURCES.map(({ id, name, about, key: needsKey }) => ({ id, name, about, needsKey: !!needsKey })), abuseipdb: !!brain.settings.abuseipdbKey,
+      recent: [...inspector.jobs.values()].reverse().slice(0, 12).map((j) => { const v = j.view(); return { ip: j.ip, at: j.at, level: v.summary.level, score: v.summary.score, cc: v.summary.country, as: v.summary.asName }; }) });
     // an IPv6 address may come encoded (":" as %3A)
     const ipm = /^\/ip\/((?:[0-9a-fA-F.:]|%3[aA]){3,90})(?:\/(ban|unban|allow|disallow|report))?$/.exec(path);
     if (ipm) {
@@ -331,7 +365,7 @@ export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", 
       res.setHeader("Content-Disposition", `inline; filename="bulwark-blocklist.${fmt === "json" ? "json" : fmt === "csv" ? "csv" : "txt"}"`);
       return send(res, 200, exportList(fmt), fmt === "json" ? "application/json" : fmt === "csv" ? "text/csv" : "text/plain; charset=utf-8");
     }
-    if (path === "/lists" && m === "GET") return send(res, 200, { adds: brain.listAdds, lists: brain.feeds.view(), total: brain.feeds.total(), asn: brain.asn.view(), signatures: [...SIGNATURES, ...UA_SIGNATURES].map(({ id, name, score }) => ({ id, name, score })) });
+    if (path === "/lists" && m === "GET") return send(res, 200, { adds: brain.listAdds, lists: brain.feeds.view(), total: brain.feeds.total(), asn: brain.asn.view(), signatures: catalog(), categories: CATEGORIES, engine: matcherStats() });
     if (path === "/lists/refresh" && m === "POST") { await brain.feeds.refreshDue(true); return send(res, 200, { lists: brain.feeds.view(), total: brain.feeds.total() }); }
     if (path === "/vendors" && m === "GET") return send(res, 200, { ...brain.reporters.view(), abuseipdb: !!brain.settings.abuseipdbKey, report: brain.settings.report });
     if (path === "/history" && m === "GET") return send(res, 200, { last: brain.state.history?.last || null, hosts: [...brain.sensors].map((x) => x.info?.host).filter(Boolean) });

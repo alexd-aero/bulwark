@@ -291,3 +291,23 @@ test("a notice row's reason: the sign-in detour undone, trimmed", async () => {
   assert.equal(shortReason("18 payloads (/js/raif_ch.js, /__gate/sso?to=8790.tunnel.example&next=%2Fjs%2Ftwint_ch.js)"), "18 payloads (/js/raif_ch.js, /js/twint_ch.js)");
   assert.ok(shortReason("x".repeat(300)).length <= 110);
 });
+
+test("the IP Inspector over the API: a report (offline: nothing asked outside), its export, the taxonomy", async () => {
+  const r = await get("/api/inspect/136.85.34.52?wait=2000");
+  assert.equal(r.ip, "136.85.34.52");
+  assert.equal(r.running, false);
+  assert.ok(Object.values(r.sources).every((s) => s.state === "skipped"), "offline: no source asked");
+  assert.ok(r.here.logs.length >= 2, "what it did here");
+  assert.ok(r.here.cats.some((c) => c.id === "secrets"));
+  assert.ok(r.summary.score > 0 && r.summary.why.some((w) => w.source === "bulwark"));
+  assert.ok(r.links.some((l) => l.url.includes("abuseipdb.com/check/136.85.34.52")));
+  const ex = await fetch(base() + "/api/inspect/136.85.34.52/export", { headers: { "x-bulwark-key": "k" } });
+  assert.match(ex.headers.get("content-disposition"), /attachment; filename="bulwark-inspect-136\.85\.34\.52\.json"/);
+  assert.match((await ex.json()).tool, /IP Inspector/);
+  assert.equal((await fetch(base() + "/api/inspect/nope", { headers: { "x-bulwark-key": "k" } })).status, 404);
+  const meta = await get("/api/inspect");
+  assert.ok(meta.sources.length >= 12 && meta.recent.some((x) => x.ip === "136.85.34.52"));
+  const l = await get("/api/lists");
+  assert.ok(l.categories.length >= 20 && l.signatures.every((s) => s.cat && s.sev));
+  assert.ok((await get("/api/logs?cat=secrets")).logs.length >= 14, "the log filters by category");
+});

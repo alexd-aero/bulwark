@@ -1,8 +1,8 @@
 // Bulwark's dashboard. Plain modules, no build step, no inline handlers (strict CSP):
 // everything is wired through data-act attributes and one delegated listener.
 // All paths are relative, so it works at / and under a host's mount (/__gate/bulwark/).
-import { TimeChart, Heatmap, fmtN, netName } from "./charts.js";
-import { Workflow } from "./graph.js";
+import { TimeChart, Heatmap, fmtN, netName } from "./charts.js?v=1.7.0";
+import { Workflow } from "./graph.js?v=1.7.0";
 
 const $ = (s, el = document) => el.querySelector(s);
 const app = $("#app");
@@ -20,6 +20,8 @@ const ICONS = {
   ban: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="m5.6 5.6 12.8 12.8"/></svg>',
   layers: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 13 9 5 9-5" opacity=".6"/></svg>',
   send: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M21 3 10 14M21 3l-7 18-4-7-7-4 18-7Z"/></svg>',
+  search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m20 20-4.8-4.8"/><path d="M10.5 7.5v6M7.5 10.5h6" opacity=".55"/></svg>',
+  ext: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>',
   device: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="2" y="4" width="14" height="10" rx="1.5"/><path d="M6 18h6M9 14v4"/><rect x="17" y="8" width="5" height="12" rx="1.2"/></svg>',
   phone: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="6.5" y="2.5" width="11" height="19" rx="2.2"/><path d="M10.5 18.5h3"/></svg>',
   laptop: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="4" y="4.5" width="16" height="11" rx="1.5"/><path d="M2 19.5h20"/></svg>',
@@ -32,7 +34,7 @@ const SEVP = { critical: "crit", warn: "warn", info: "info" };
 const SPAN_KEYS = ["15m", "1h", "6h", "24h", "7d", "30d", "90d"];
 // your devices (the host's device keys): id -> name, for the log and the address drawer
 const devName = (id) => S.devices?.find((d) => d.id === id)?.name || "one of your devices";
-const S = { devices: null, view: "overview", span: localStore("span") || "24h", gspan: "24h", ov: null, logs: [], logF: { dec: "", sig: "", q: "", ip: "", host: "" }, paused: false,
+const S = { devices: null, view: "overview", span: localStore("span") || "24h", gspan: "24h", ov: null, logs: [], logF: { dec: "", sig: "", cat: "", q: "", ip: "", host: "" }, paused: false,
             open: null, alerts: null, bl: null, lists: null, vendors: null, settings: null, ip: null, live: false, newIds: new Set() };
 let charts = {};
 function localStore(k, v) { try { if (v === undefined) return localStorage.getItem("bulwark-" + k); localStorage.setItem("bulwark-" + k, v); } catch { return null; } }
@@ -47,8 +49,19 @@ const post = (path, body = {}) => api(path, { method: "POST", body: JSON.stringi
 function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove("show"), 2600); }
 const seg = (act, cur, keys = SPAN_KEYS) => `<div class="seg">${keys.map((k) => `<button data-act="${act}" data-v="${k}" class="${k === cur ? "on" : ""}">${k}</button>`).join("")}</div>`;
 const decPill = (d) => `<span class="pill ${DEC[d]?.[0] || ""}">${h(DEC[d]?.[1] || d)}</span>`;
+// the taxonomy (from api/lists): what a signature is, and its category
+const catOf = (id) => S.catMap?.get(id) || null;
+const sigOf = (id) => S.sigMap?.get(id) || null;
+const catPill = (cat, full = false) => { const c = catOf(cat); return c ? `<span class="cat" style="--k:${h(c.color)}" title="${h(c.name)}">${h(full ? c.name : c.short)}</span>` : ""; };
+const sevPill = (sev) => (sev ? `<span class="sev sev-${h(sev)}">${h(sev)}</span>` : "");
+const cveLink = (cve) => (cve ? `<a class="cve" href="https://nvd.nist.gov/vuln/detail/${h(cve)}" target="_blank" rel="noopener noreferrer">${h(cve)}</a>` : "");
+const catsOfProfile = (p) => { const m = new Map(); for (const [sig, n] of Object.entries(p?.sigs || {})) { const c = sigOf(sig)?.cat; if (c && sigOf(sig)?.sev !== "info") m.set(c, (m.get(c) || 0) + n); } return [...m].sort((a, b) => b[1] - a[1]); };
 const ipBtn = (ip, cc) => `<a href="#" data-act="ip" data-ip="${h(ip)}" class="mono">${flag(cc)} ${h(ip)}</a>`;
 const bars = (rows, label, n, cls = () => "") => { const max = Math.max(1, ...rows.map(n)); return `<div class="bars">${rows.map((r) => `<div class="bar"><span class="lbl">${label(r)}</span><span class="n">${fmtN(n(r))}</span><span class="track"><i class="${cls(r)}" style="width:${(100 * n(r)) / max}%"></i></span></div>`).join("")}</div>`; };
+
+// categories as a grid of bars, each in its colour; click one for its requests
+const catBars = (rows) => { const max = Math.max(1, ...rows.map((r) => r.n)); return `<div class="catbars">${rows.map((r) => `<a href="#" class="catbar" data-act="logf" data-k="cat" data-v="${h(r.id)}" style="--k:${h(r.color || "#888")}" title="${h(catOf(r.id)?.about || "")}">
+  <span class="lbl">${h(r.name)}</span><span class="n">${fmtN(r.n)}</span><span class="track"><i style="width:${(100 * r.n) / max}%"></i></span></a>`).join("")}</div>`; };
 
 // ------------------------------------------------------------------ overview
 async function loadOverview() {
@@ -84,8 +97,9 @@ function renderOverview() {
     <section class="card" style="margin-bottom:14px"><h3>Traffic <span class="faint">by what happened</span></h3><div id="cTraffic"></div>
       <div class="legend"><span><i style="background:#3d4450"></i>through</span><span><i style="background:#f2b53c"></i>payload dropped</span><span><i style="background:#ff5a52"></i>blocked</span><span><i style="background:#e040fb"></i>banned</span><span><i style="background:#7aa7ff"></i>held for a check</span><span><i style="background:#46c2ff"></i>new addresses (right axis)</span></div></section>
     <section class="card" style="margin-bottom:14px"><h3>Attack patterns <span class="faint">over time</span></h3><div id="cHeat"></div></section>
+    <section class="card" style="margin-bottom:14px"><h3>What they're after <span class="faint">attack requests from strangers, by category</span></h3>${o.tops.cats?.length ? catBars(o.tops.cats) : '<p class="empty">No attacks in this window.</p>'}</section>
     <div class="grid g3" style="margin-bottom:14px">
-      <section class="card"><h3>Patterns <span class="faint">(attack requests)</span></h3>${o.tops.sigs.length ? bars(o.tops.sigs, (r) => h(r.name), (r) => r.n, (r) => "s" + r.score) : '<p class="empty">No attacks in this window.</p>'}</section>
+      <section class="card"><h3>Patterns <span class="faint">(attack requests)</span></h3>${o.tops.sigs.length ? bars(o.tops.sigs, (r) => `${catPill(r.cat)} ${h(r.name)}${r.cve ? ` <span class="faint mono small">${h(r.cve)}</span>` : ""}`, (r) => r.n, (r) => "s" + r.score) : '<p class="empty">No attacks in this window.</p>'}</section>
       <section class="card"><h3>Networks <span class="faint">(strangers' requests)</span></h3>${o.tops.orgs.length ? bars(o.tops.orgs, (r) => `${h(r.org)} <span class="faint mono">AS${r.asn}</span>${r.dc ? ' <span class="pill dc">hosting</span>' : ""}`, (r) => r.n, (r) => (r.dc ? "dc" : "")) : '<p class="empty">–</p>'}</section>
       <section class="card"><h3>Countries <span class="faint">(strangers' addresses)</span></h3>${o.tops.countries.length ? bars(o.tops.countries, (r) => `${flag(r.cc)} ${h(r.cc)}`, (r) => r.n) : '<p class="empty">–</p>'}</section>
     </div>
@@ -119,23 +133,24 @@ async function loadLog(more) {
   S.logEnd = r.logs.length < 300;                // nothing older to fetch
   return r.logs;
 }
-const logMatches = (e) => { const f = S.logF; if (f.dec && (f.dec === "bad" ? e.dec === "pass" : e.dec !== f.dec)) return false; if (f.sig && (f.sig === "any" ? !e.sig : e.sig !== f.sig)) return false; if (f.ip && e.ip !== f.ip) return false; if (f.host && e.host !== f.host) return false; if (f.q && !`${e.ip} ${e.host} ${e.path} ${e.ua} ${e.why || ""} ${e.org || ""}`.toLowerCase().includes(f.q.toLowerCase())) return false; return true; };
+const logMatches = (e) => { const f = S.logF; if (f.dec && (f.dec === "bad" ? e.dec === "pass" : e.dec !== f.dec)) return false; if (f.sig && (f.sig === "any" ? !e.sig : e.sig !== f.sig)) return false; if (f.cat && (e.cat || sigOf(e.sig)?.cat) !== f.cat) return false; if (f.ip && e.ip !== f.ip) return false; if (f.host && e.host !== f.host) return false; if (f.q && !`${e.ip} ${e.host} ${e.path} ${e.ua} ${e.why || ""} ${e.org || ""}`.toLowerCase().includes(f.q.toLowerCase())) return false; return true; };
 function logRow(e) {
   return `<tr class="click d-${h(e.dec)} ${S.newIds.has(e.id) ? "new" : ""}" data-act="logrow" data-id="${e.id}">
     <td class="faint mono">${clock(e.t)}</td><td>${decPill(e.dec)}</td><td>${ipBtn(e.ip, e.cc)}${e.dc ? ' <span class="pill dc">hosting</span>' : ""}${e.dev ? ` <span class="pill ok dev" title="${h(devName(e.dev))}: recognized by its device key">${h(devName(e.dev))}</span>` : e.auth ? ' <span class="pill ok">you</span>' : ""}</td>
     <td class="mono">${h(e.m)}</td><td class="mono path" title="${h(e.path)}"><span class="faint">${h((e.host || "").split(".")[0])}</span>${h(e.path)}</td>
     <td class="mono st${String(e.st || 0)[0]}">${e.st || "–"}</td><td class="mono faint">${e.ms != null ? e.ms + "ms" : ""}</td>
-    <td>${e.sig ? `<span class="pill ${e.sc === 3 ? "block" : "drop"}">${h(e.sig)}</span>` : ""}</td><td class="why" title="${h(e.org || "")}">${h(e.org || "")}</td></tr>
+    <td class="nowrap" title="${h(e.sig ? `${sigOf(e.sig)?.name || e.sig}${e.cve ? ` · ${e.cve}` : ""}` : "")}">${e.sig ? (catPill(e.cat || sigOf(e.sig)?.cat) || `<span class="sigid ${e.sc === 3 ? "pay" : ""}">${h(e.sig)}</span>`) : ""}</td><td class="why" title="${h(e.org || "")}">${h(e.org || "")}</td></tr>
     ${S.open === e.id ? `<tr class="logdetail"><td colspan="9">${logDetail(e)}</td></tr>` : ""}`;
 }
 function logDetail(e) {
   const kv = [["Time", new Date(e.t).toISOString()], ["Address", `${e.ip} ${e.cc ? "· " + e.cc : ""}`], ["Network", e.asn ? `AS${e.asn} ${e.org || ""}${e.dc ? " (hosting)" : ""}` : "–"],
     ["Host", `${e.host || "–"}${e.port ? ` (tunnel ${e.port})` : e.main ? " (dashboard)" : ""}`], ["Request", `${e.m} ${e.path}`], ["Status", `${e.st || "–"} · ${fmtB(e.b || 0)}${e.ms != null ? ` · ${e.ms} ms` : ""}${e.ws ? " · WebSocket" : ""}`],
-    ["Decision", `${DEC[e.dec]?.[1] || e.dec}${e.why ? ` · ${e.why}` : ""}`], ["Pattern", e.sig ? `${e.sig} (${e.sc === 3 ? "payload" : "probe"})` : "–"], ["Lists", (e.lists || []).join(", ") || "–"],
+    ["Decision", `${DEC[e.dec]?.[1] || e.dec}${e.why ? ` · ${e.why}` : ""}`], ["Pattern", e.sig ? { html: `${catPill(e.cat || sigOf(e.sig)?.cat, true)} ${sevPill(e.sev || sigOf(e.sig)?.sev)} <b>${h(sigOf(e.sig)?.name || e.sig)}</b> <span class="faint mono">${h(e.sig)}</span> · ${e.sc === 3 ? "a payload" : sigOf(e.sig)?.sev === "info" ? "a label" : "a probe"}${e.pts ? ` · ${e.pts} points` : ""}${e.cve ? ` · ${cveLink(e.cve)}` : ""}` } : "–"],
+    ...(e.hits?.length ? [["All hits", { html: e.hits.map((x) => `${catPill(sigOf(x)?.cat)} <span class="mono small">${h(x)}</span>`).join(" &nbsp;") }]] : []), ...(e.det ? [["Why", e.det]] : []), ["Lists", (e.lists || []).join(", ") || "–"],
     ["User agent", e.ua || "–"], ["Referer", e.ref || "–"], ["Language", e.lang || "–"], ["Came via", `${e.via || "–"}${e.ray ? ` · ray ${e.ray}` : ""}${e.proto ? ` · HTTP/${e.proto}` : ""}`],
     ["Signed in", e.auth === undefined ? "not checked" : e.auth ? "yes" : "no"], ["Device", e.dev ? `${devName(e.dev)} (its device key)` : "not one of yours, or never signed in"], ["Log id", `#${e.id}${e.src ? ` · from ${e.src === "aegis-burrow" ? "Aegis's" : "the host's"} history` : ""}`]];
-  return `<dl class="kv">${kv.map(([k, v]) => `<dt>${k}</dt><dd class="${k === "Request" || k === "User agent" ? "mono" : ""}">${h(v)}</dd>`).join("")}</dl>
-    <div class="row" style="margin-top:10px"><button class="btn sm" data-act="ip" data-ip="${h(e.ip)}">This address</button><button class="btn sm ghost" data-act="logf" data-k="ip" data-v="${h(e.ip)}">Only this address</button>${e.host ? `<button class="btn sm ghost" data-act="logf" data-k="host" data-v="${h(e.host)}">Only ${h(e.host)}</button>` : ""}</div>`;
+  return `<dl class="kv">${kv.map(([k, v]) => `<dt>${k}</dt><dd class="${k === "Request" || k === "User agent" ? "mono" : ""}">${v?.html ?? h(v)}</dd>`).join("")}</dl>
+    <div class="row" style="margin-top:10px"><button class="btn sm" data-act="ip" data-ip="${h(e.ip)}">This address</button><a class="btn sm ghost" href="#/inspect/${encodeURIComponent(e.ip)}" data-act="goinspect">Inspect</a><button class="btn sm ghost" data-act="logf" data-k="ip" data-v="${h(e.ip)}">Only this address</button>${e.host ? `<button class="btn sm ghost" data-act="logf" data-k="host" data-v="${h(e.host)}">Only ${h(e.host)}</button>` : ""}</div>`;
 }
 function renderLog() {
   const f = S.logF;
@@ -147,8 +162,9 @@ function renderLog() {
     <div class="logbar">
       <input class="input" id="lq" placeholder="search address, path, user agent, network…" value="${h(f.q)}" style="flex:1;min-width:200px">
       <select class="input" data-act="logsel" data-k="dec"><option value="">everything</option>${[["bad", "stopped (any)"], ["drop", "payload dropped"], ["block", "blocked"], ["ban", "banned"], ["pass", "let through"]].map(([v, l]) => `<option value="${v}" ${f.dec === v ? "selected" : ""}>${l}</option>`).join("")}</select>
+      <select class="input" data-act="logsel" data-k="cat"><option value="">any category</option>${(S.cats || []).map((c) => `<option value="${c.id}" ${f.cat === c.id ? "selected" : ""}>${h(c.name)}</option>`).join("")}</select>
       <select class="input" data-act="logsel" data-k="sig"><option value="">any pattern</option><option value="any" ${f.sig === "any" ? "selected" : ""}>attacks only</option>${(S.sigs || []).map((s) => `<option value="${s.id}" ${f.sig === s.id ? "selected" : ""}>${h(s.name)}</option>`).join("")}</select>
-      ${f.ip ? `<span class="pill">ip ${h(f.ip)} <a href="#" data-act="logf" data-k="ip" data-v="">✕</a></span>` : ""}${f.host ? `<span class="pill">host ${h(f.host)} <a href="#" data-act="logf" data-k="host" data-v="">✕</a></span>` : ""}
+      ${f.cat ? `<span class="pill">${h(catOf(f.cat)?.name || f.cat)} <a href="#" data-act="logf" data-k="cat" data-v="">✕</a></span>` : ""}${f.ip ? `<span class="pill">ip ${h(f.ip)} <a href="#" data-act="logf" data-k="ip" data-v="">✕</a></span>` : ""}${f.host ? `<span class="pill">host ${h(f.host)} <a href="#" data-act="logf" data-k="host" data-v="">✕</a></span>` : ""}
       <button class="btn sm" data-act="pause">${S.paused ? "▶ Resume" : "❚❚ Pause"}</button>
     </div>
     <section class="card" style="padding:6px 8px">${S.logs.length ? `<div class="scroll" id="logScroll" style="max-height:calc(100vh - 230px)"><table class="logtable"><thead><tr><th>Time</th><th></th><th>Address</th><th>Method</th><th>Path</th><th>Status</th><th>Took</th><th>Pattern</th><th>Network</th></tr></thead>
@@ -160,7 +176,7 @@ function renderLog() {
   if (winY) window.scrollTo(0, winY);
   S.newIds.clear();
 }
-const logMoreBtn = () => S.logEnd ? `<span class="faint small">That's everything${S.logF.q || S.logF.ip || S.logF.dec || S.logF.sig || S.logF.host ? " that matches" : " kept"} (${fmtN(S.logs.length)} lines).</span>`
+const logMoreBtn = () => S.logEnd ? `<span class="faint small">That's everything${S.logF.q || S.logF.ip || S.logF.dec || S.logF.sig || S.logF.cat || S.logF.host ? " that matches" : " kept"} (${fmtN(S.logs.length)} lines).</span>`
   : `<button class="btn sm" data-act="logmore">Load older</button> <span class="faint small">${fmtN(S.logs.length)} shown</span>`;
 // older lines go under the ones on screen: nothing is repainted, the view stays where it is
 async function logMore(btn) {
@@ -216,7 +232,8 @@ async function renderPatterns() {
   const T = d.totals, pct = (a, b) => (b ? Math.round((100 * a) / b) : 0);
   const maxReq = Math.max(1, ...d.sigs.map((x) => x.requests)), maxIps = Math.max(1, ...d.sigs.map((x) => x.ips));
   const sigRow = (x) => `<tr class="click" data-act="patpick" data-id="${h(x.id)}">
-      <td title="${h(x.sig)}"><span class="pk ${kindOf(x)}" aria-hidden="true"></span><b>${h(x.name)}</b></td>
+      <td title="${h(x.sig)}"><span class="pk ${kindOf(x)}" aria-hidden="true"></span><b>${h(x.name)}</b>${x.cve ? ` <span class="faint mono small">${h(x.cve)}</span>` : ""}</td>
+      <td>${catPill(x.cat)}</td>
       <td class="pk-kind">${kindOf(x) === "payload" ? "payload" : "probe"}</td>
       <td class="num"><span class="pbar"><i class="${kindOf(x)}" style="width:${(100 * x.ips) / maxIps}%"></i></span>${fmtN(x.ips)}</td>
       <td class="num mono">${fmtN(x.requests)}</td>
@@ -234,6 +251,11 @@ async function renderPatterns() {
       <div class="card stat"><b>${fmtN(T.nets)}</b><span>networks</span><div class="sub">${fmtN(d.flow.nets.filter((n) => n.dc).length)} of the top ones are hosting</div></div>
       <div class="card stat ${T.campaigns ? "warm" : ""}"><b>${fmtN(T.campaigns)}</b><span>campaigns</span><div class="sub">many addresses, one playbook</div></div>
     </div>
+    ${d.cats?.length ? `<section class="card" style="margin-bottom:14px"><h3>By category <span class="faint">click one for its addresses</span></h3>
+      <div class="catgrid">${d.cats.map((c) => `<button class="catcard" data-act="patpick" data-id="cat:${h(c.id)}" style="--k:${h(c.color || "#888")}">
+        <span class="cc-top"><b>${h(c.name)}</b><span class="faint small">${h(catOf(c.id)?.mitre?.[0] || "")}</span></span>
+        <span class="cc-n"><b>${fmtN(c.ips)}</b> addresses · ${fmtN(c.requests)} requests${c.banned ? ` · <span class="ban-share">${fmtN(c.banned)} banned</span>` : ""}</span>
+        <span class="cc-sigs faint small">${c.sigs.map(h).join(" · ")}</span></button>`).join("")}</div></section>` : ""}
     <section class="card flow-card">
       <div class="row flow-head"><div><h3>The attack workflow</h3><p class="muted small">Where attackers come from, what they tried, and what Bulwark did about it. A line's width is how many addresses took that path; the busiest are named, the rest folded into "other".</p></div>
         <span class="spacer"></span><div class="flow-legend"><span><i style="background:var(--pass-hi)"></i>network</span><span><i style="background:var(--block)"></i>payload</span><span><i style="background:var(--drop)"></i>probe</span><span><i style="background:var(--known)"></i>known bad</span><span><i style="background:var(--ban)"></i>banned</span></div></div>
@@ -241,7 +263,7 @@ async function renderPatterns() {
     <div class="grid pat-two">
       <section class="card"><h3>Every pattern <span class="faint">${d.sigs.length}</span></h3>
         ${!d.sigs.length ? `<p class="muted small">No attack patterns in this window${T.known ? `: the ${fmtN(T.known)} hostile ${T.known === 1 ? "address was" : "addresses were"} stopped for who ${T.known === 1 ? "it is" : "they are"} (a blocklist, the lookups or you) before trying anything` : ""}.</p>` : ""}
-        <div class="scroll pat-table"><table><thead><tr><th>Pattern</th><th>Kind</th><th class="num">Addresses</th><th class="num">Requests</th><th class="num">Banned</th><th>Last</th></tr></thead>
+        <div class="scroll pat-table"><table><thead><tr><th>Pattern</th><th>Category</th><th>Kind</th><th class="num">Addresses</th><th class="num">Requests</th><th class="num">Banned</th><th>Last</th></tr></thead>
           <tbody>${d.sigs.map(sigRow).join("")}</tbody></table></div></section>
       <section class="card"><h3>Campaigns <span class="faint">${d.waves.length}</span></h3>
         ${d.waves.length ? `<div class="wave-list">${d.waves.map(waveCard).join("")}</div>` : '<p class="muted small">None in this window. A campaign is many addresses running the same playbook at once (Waves has the details).</p>'}</section>
@@ -252,6 +274,7 @@ async function renderPatterns() {
       who: async (id) => (await api(`patterns/who?span=${S.gspan}&id=${encodeURIComponent(id)}`)).ips,
       onIp: (ip) => openIp(ip),
       onLog: (sig) => { S.logF = { ...S.logF, sig }; location.hash = "#/log"; },
+      cat: (id) => catOf(id),
     });
     charts.flow.set(d.flow);
   }
@@ -260,7 +283,8 @@ async function renderPatterns() {
 async function openPop(id, label) {
   const pop = $("#pop");
   const any = [...(S.pat?.sigs || []), ...(S.pat?.flow.nets || []), ...(S.pat?.flow.sigs || []), ...(S.pat?.waves || [])].find((x) => x.id === id) || {};
-  const kind = id.startsWith("wave:") ? "campaign" : id.startsWith("as:") ? (id === "as:other" ? "networks" : any.dc ? "hosting network" : "network") : any.score === 3 ? "payload pattern" : "probe pattern";
+  if (id.startsWith("cat:")) Object.assign(any, { name: catOf(id.slice(4))?.name || id.slice(4) });
+  const kind = id.startsWith("cat:") ? "attack category" : id.startsWith("wave:") ? "campaign" : id.startsWith("as:") ? (id === "as:other" ? "networks" : any.dc ? "hosting network" : "network") : any.score === 3 ? "payload pattern" : "probe pattern";
   const title = label || any.title || any.org || any.name || id;
   pop.innerHTML = `<div class="pop-card" role="dialog" aria-modal="true" aria-label="${h(title)}"><div class="row"><div><div class="faint small">${h(kind)} · ${S.gspan}</div><h2>${h(title)}</h2></div><span class="spacer"></span><button class="btn sm ghost" data-act="popclose" aria-label="Close">✕</button></div><p class="muted"><span class="spin"></span> Finding them…</p></div>`;
   pop.hidden = false;
@@ -268,7 +292,7 @@ async function openPop(id, label) {
   let ips = [];
   try { ips = (await api(`patterns/who?span=${S.gspan}&id=${encodeURIComponent(id)}`)).ips; } catch (e) { toast(e.message); }
   const banned = ips.filter((x) => x.banned).length, sigOnly = id.startsWith("sig:") && !id.startsWith("sig:other");
-  const logBtn = sigOnly ? `<button class="btn sm ghost" data-act="poplog" data-k="sig" data-v="${h(id.slice(4))}">Show its requests in the live log</button>` : "";
+  const logBtn = id.startsWith("cat:") ? `<button class="btn sm ghost" data-act="poplog" data-k="cat" data-v="${h(id.slice(4))}">Show its requests in the live log</button>` : sigOnly ? `<button class="btn sm ghost" data-act="poplog" data-k="sig" data-v="${h(id.slice(4))}">Show its requests in the live log</button>` : "";
   pop.innerHTML = `<div class="pop-card" role="dialog" aria-modal="true" aria-label="${h(title)}">
       <div class="row"><div><div class="faint small">${h(kind)} · ${S.gspan}</div><h2>${h(title)}</h2></div><span class="spacer"></span><button class="btn sm ghost" data-act="popclose" aria-label="Close">✕</button></div>
       <p class="muted small">${fmtN(ips.length)} address${ips.length === 1 ? "" : "es"}${banned ? ` · <b class="st4">${fmtN(banned)} banned</b>` : ""}. Click one for everything about it.</p>
@@ -286,7 +310,7 @@ const SRC = { list: "blocklist", payload: "payloads", lookup: "lookup", manual: 
 const banRow = (b, fresh) => `<tr class="click ${fresh ? "new" : ""}" data-act="ip" data-ip="${h(b.ip)}"><td>${ipBtn(b.ip, b.country)}</td><td class="why" title="${h(b.reason)}">${h(b.reason)}</td><td><span class="pill">${h(SRC[b.source] || b.source)}</span></td>
         <td class="why">${h(b.org || "–")}${b.dc ? ' <span class="pill dc">hosting</span>' : ""}</td><td class="faint">${ago(b.at)}</td><td class="faint">${b.until ? new Date(b.until).toLocaleDateString() : "for good"}</td><td class="mono">${fmtN(b.hits || 0)}</td>
         <td>${b.reported ? '<span class="pill ok">reported</span>' : b.source === "payload" ? '<span class="pill">queued</span>' : '<span class="faint small">known</span>'}</td>
-        <td><button class="btn sm" data-act="unban" data-ip="${h(b.ip)}">Unban</button></td></tr>`;
+        <td class="nowrap"><a class="btn sm ghost icon" href="#/inspect/${encodeURIComponent(b.ip)}" data-act="goinspect" title="Inspect ${h(b.ip)}" aria-label="Inspect ${h(b.ip)}">${ICONS.search}</a> <button class="btn sm" data-act="unban" data-ip="${h(b.ip)}">Unban</button></td></tr>`;
 // every 5 s: only the bans that weren't there, put on top
 async function blTick() {
   if (S.view !== "addresses" || !S.bl || document.hidden) return;
@@ -326,15 +350,22 @@ async function renderLists() {
   const L = S.lists;
   app.innerHTML = `
     <div class="head"><div><h1>Lists</h1><p>${fmtN(L.total)} addresses from ${L.lists.filter((x) => x.loadedNow).length} public blocklists, refreshed every few hours and looked up locally in microseconds, plus a network database of ${fmtN(L.asn.ranges)} ranges.</p></div><div class="spacer"></div><button class="btn" data-act="refreshlists">Update now</button></div>
-    <section class="card" style="margin-bottom:14px"><table><thead><tr><th>List</th><th>What</th><th>Counts as</th><th>Addresses</th><th>Updated</th></tr></thead><tbody>
+    <section class="card" style="margin-bottom:14px"><div class="scroll"><table><thead><tr><th>List</th><th>What</th><th>Counts as</th><th>Addresses</th><th>Updated</th></tr></thead><tbody>
       ${L.lists.map((f) => `<tr><td><b>${h(f.name)}</b><div class="faint small">${h(f.vendor)}</div></td><td class="muted small">${h(f.about)}</td><td><span class="pill ${f.strength === "strong" ? "block" : f.strength === "weak" ? "drop" : ""}">${f.strength === "strong" ? "a ban" : f.strength === "weak" ? "a mark" : "shown"}</span></td>
         <td class="mono">${f.loadedNow ? fmtN(f.count) : "–"}${f.added ? ` <span class="pill ok" title="added since the last full read">+${fmtN(f.added)}</span>` : ""}</td>
         <td class="small ${f.error ? "st5" : "faint"}">${f.error ? h(f.error) : `${f.checked ? `checked ${ago(f.checked)}` : f.at ? ago(f.at) : f.loadedNow ? "from disk" : "downloading…"}${f.addedAt ? ` · new ${ago(f.addedAt)}` : ""}<div class="faint">asked every ${f.poll >= 60e3 ? Math.round(f.poll / 60e3) + " min" : Math.round(f.poll / 1e3) + " s"}</div>`}</td></tr>`).join("")}
       <tr><td><b>iptoasn</b><div class="faint small">networks</div></td><td class="muted small">who holds each address (AS number, name, country), for grouping waves</td><td><span class="pill">info</span></td><td class="mono">${fmtN(L.asn.ranges)}</td><td class="small faint">${L.asn.error ? h(L.asn.error) : L.asn.at ? ago(L.asn.at) : "loading"}</td></tr>
-    </tbody></table></section>
-    <section class="card" style="margin-bottom:14px"><h3>Just added <span class="faint">checked every 5 s · only addresses that weren't on the list yet</span></h3>${L.adds?.length ? `<table><tbody>${L.adds.slice(0, 20).map((a) => `<tr><td class="faint mono">${ago(a.t)}</td><td>${h((L.lists.find((f) => f.id === a.id) || {}).name || a.id)}</td><td class="mono">+${fmtN(a.n)}</td><td class="mono faint small">${a.sample.map(h).join(", ")}${a.n > a.sample.length ? "…" : ""}</td></tr>`).join("")}</tbody></table>` : '<p class="faint small" style="margin:0">Nothing new since Bulwark started; each source is asked whether it changed as often as it publishes.</p>'}</section>
-    <section class="card"><h3>Payload patterns <span class="faint">what Bulwark recognises in a request</span></h3><div class="row">${L.signatures.map((s) => `<span class="pill ${s.score === 3 ? "block" : "drop"}">${h(s.name)}</span>`).join("")}</div>
-      <p class="faint small" style="margin:10px 0 0">Red: a payload (looking for secrets or a way in), dropped with a 404 and scored. Amber: a probe for software that isn't here, a mark against the address.</p></section>`;
+    </tbody></table></div></section>
+    <section class="card" style="margin-bottom:14px"><h3>Just added <span class="faint">checked every 5 s · only addresses that weren't on the list yet</span></h3>${L.adds?.length ? `<div class="scroll"><table><tbody>${L.adds.slice(0, 20).map((a) => `<tr><td class="faint mono">${ago(a.t)}</td><td>${h((L.lists.find((f) => f.id === a.id) || {}).name || a.id)}</td><td class="mono">+${fmtN(a.n)}</td><td class="mono faint small">${a.sample.map(h).join(", ")}${a.n > a.sample.length ? "…" : ""}</td></tr>`).join("")}</tbody></table></div>` : '<p class="faint small" style="margin:0">Nothing new since Bulwark started; each source is asked whether it changed as often as it publishes.</p>'}</section>
+    <section class="card"><h3>What Bulwark recognises <span class="faint">${fmtN(L.signatures.length)} signatures in ${L.categories.length} categories · ${fmtN(L.signatures.filter((x) => x.cve).length)} tagged with their CVE</span></h3>
+      <p class="muted small" style="margin-top:0">Every request is decoded the way the app will see it (URL encoding up to three times, %u, overlong UTF-8, look-alike characters, entities, null bytes, dot segments), matched against these signatures in one pass, and SQL injection and XSS are judged by their shape. Each hit adds its severity's points (critical 5, high 4, medium 3, low 2); 5 makes a payload, dropped on the spot. An address's points add up: 10 bans it.</p>
+      <div class="scroll"><table class="tax"><thead><tr><th>Category</th><th>Signatures</th><th>MITRE ATT&amp;CK</th><th>OWASP</th><th>Core Rule Set</th><th>AbuseIPDB</th></tr></thead><tbody>
+      ${L.categories.map((c) => { const sg = L.signatures.filter((x) => x.cat === c.id); return `<tr><td>${catPill(c.id, true)}<div class="faint small tax-about">${h(c.about)}</div></td>
+        <td class="small">${sg.map((x) => `<span class="sigchip ${x.score === 3 ? "pay" : ""}" title="${h(x.sev)}${x.cve ? " · " + h(x.cve) : ""}">${h(x.name)}${x.cve ? ` <span class="faint">${h(x.cve)}</span>` : ""}</span>`).join("")}</td>
+        <td class="mono small">${c.mitre.map((t) => `<a href="https://attack.mitre.org/techniques/${h(t.replace(".", "/"))}/" target="_blank" rel="noopener noreferrer">${h(t)}</a>`).join(" ")}</td>
+        <td class="mono small">${h(c.owasp || "–")}</td><td class="small faint">${h(c.crs || "–")}</td><td class="mono small">${[...c.abuse].sort((a, b) => a - b).join(", ")}</td></tr>`; }).join("")}
+      </tbody></table></div>
+      ${L.engine?.length ? `<p class="faint small" style="margin:10px 0 0">The matcher: ${L.engine.map((g) => `${fmtN(g.regexes)} patterns behind ${fmtN(g.literals)} literals (${g.surface.startsWith("u:") ? "User-Agent" : g.surface.split(":")[1]})`).join(" · ")}, one pass over each request.</p>` : ""}</section>`;
 }
 
 // ------------------------------------------------------------------ vendors
@@ -446,12 +477,14 @@ function drawIp() {
     ${i.verdict?.why?.length ? `<div class="row">${i.verdict.why.map((w) => `<span class="pill">${h(w)}</span>`).join("")}</div>` : ""}
     <div class="row">${v.ban ? `<button class="btn" data-act="unban" data-ip="${h(v.ip)}">Unban</button>` : `<button class="btn danger" data-act="ban" data-ip="${h(v.ip)}">Ban</button>`}
       ${v.allowed ? `<button class="btn ghost" data-act="disallow" data-ip="${h(v.ip)}">Stop allowing</button>` : `<button class="btn ghost" data-act="allow" data-ip="${h(v.ip)}">Always allow</button>`}
-      <button class="btn ghost" data-act="report" data-ip="${h(v.ip)}">Report to vendors</button><button class="btn ghost" data-act="logf" data-k="ip" data-v="${h(v.ip)}">Its log</button></div>
+      <button class="btn ghost" data-act="report" data-ip="${h(v.ip)}">Report to vendors</button><button class="btn ghost" data-act="logf" data-k="ip" data-v="${h(v.ip)}">Its log</button>
+      <a class="btn primary" href="#/inspect/${encodeURIComponent(v.ip)}" data-act="goinspect">${ICONS.search} Full inspection</a></div>
+    ${catsOfProfile(p).length ? `<div class="row">${catsOfProfile(p).map(([c, n]) => `${catPill(c, true).replace("</span>", ` ×${n}</span>`)}`).join("")}${(p.cves || []).map(cveLink).join("")}</div>` : ""}
     ${v.devices?.length ? `<section class="card"><h3>Your devices on it</h3>${v.devices.map((d) => `<div class="row"><a href="#/devices" class="dev-link">${ICONS.device}${h(d.name)}</a><span class="faint small">${ago(d.last)}</span></div>`).join("")}<p class="faint small" style="margin:8px 0 0">Recognized by their device keys, so this address is trusted and never banned automatically.</p></section>` : ""}
     ${v.ban ? `<section class="card"><h3>Banned</h3><dl class="kv"><dt>Why</dt><dd>${h(v.ban.reason)}</dd><dt>By</dt><dd>${h(v.ban.source)}</dd><dt>Since</dt><dd>${new Date(v.ban.at).toLocaleString()}</dd><dt>Until</dt><dd>${v.ban.until ? new Date(v.ban.until).toLocaleString() : "for good"}</dd><dt>Turned away</dt><dd>${fmtN(v.ban.hits || 0)} requests since</dd>${v.ban.lines?.length ? `<dt>Evidence</dt><dd class="mono">${v.ban.lines.map(h).join("<br>")}</dd>` : ""}</dl></section>` : ""}
     <section class="card"><h3>Who knows it <span class="faint">vendors</span></h3><div class="cov">${v.coverage.map((c) => `<div class="${c.knows ? "k" : v.ban ? "miss" : ""}"><span>${h(c.vendor)}</span><span class="pill ${c.knows ? "ok" : ""}" title="${h(c.how)}">${c.knows ? "knows" : "missed"}</span></div>`).join("")}</div></section>
     ${p ? `<section class="card"><h3>Here</h3><dl class="kv"><dt>First seen</dt><dd>${new Date(p.first).toLocaleString()}</dd><dt>Last seen</dt><dd>${ago(p.last)}</dd><dt>Requests</dt><dd>${fmtN(p.n)} · ${fmtB(p.bytes)}</dd>
-      <dt>What happened</dt><dd>${Object.entries(p.dec).map(([d, n]) => `${decPill(d)} ${n}`).join(" ")}</dd><dt>Patterns</dt><dd>${Object.entries(p.sigs).map(([s, n]) => `<span class="pill">${h(s)} ×${n}</span>`).join(" ") || "none"}</dd>
+      <dt>What happened</dt><dd>${Object.entries(p.dec).map(([d, n]) => `${decPill(d)} ${n}`).join(" ")}</dd><dt>Patterns</dt><dd>${Object.entries(p.sigs).map(([s, n]) => `<span class="pill" style="border-color:${h(catOf(sigOf(s)?.cat)?.color || "")}55" title="${h(sigOf(s)?.name || s)}">${h(s)} ×${n}</span>`).join(" ") || "none"}</dd>
       ${p.seq?.length ? `<dt>In order</dt><dd class="mono">${p.seq.map(h).join(" → ")}</dd>` : ""}<dt>Hosts</dt><dd>${Object.entries(p.hosts).map(([x, n]) => `${h(x)} ×${n}`).join(", ") || "–"}</dd>
       <dt>User agents</dt><dd class="mono small">${p.uas.map(h).join("<br>") || "–"}</dd></dl></section>` : '<section class="card muted">Never seen here.</section>'}
     ${v.alerts.length ? `<section class="card"><h3>Waves</h3>${v.alerts.map((x) => `<div class="row"><span class="pill ${SEVP[x.sev]}">${h(x.sev)}</span>${h(x.title)} <span class="faint small">${ago(x.last)}</span></div>`).join("")}</section>` : ""}
@@ -468,6 +501,155 @@ function drawIp() {
 const line = (name, x, fmt) => `<dt>${name}</dt><dd>${x?.error ? `<span class="faint">couldn't ask: ${h(x.error)}</span>` : h(fmt(x?.result))}</dd>`;
 function closeDrawer() { $("#drawer").classList.remove("open"); $("#drawer").setAttribute("aria-hidden", "true"); S.ip = null; S.ipOpen = null; }
 
+// ------------------------------------------------------------------ the IP Inspector
+// One address, everything about it: a verdict with its reasons, every source's
+// answer (raw JSON to expand), what it did here, its neighbours, where to look
+// further. The scan runs on the app (progressively: this page polls until it's
+// complete) and only when asked.
+const LEVEL = { malicious: ["#ff5a52", "Malicious"], suspicious: ["#f2b53c", "Suspicious"], notice: ["#7aa7ff", "Worth a look"], clean: ["#35d39a", "Clean"], yours: ["#35d39a", "Yours"] };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function loadInspect() { S.insMeta = await api("inspect").catch(() => null); }
+function renderInspect() {
+  const ip = S.insIp, M = S.insMeta;
+  app.innerHTML = `
+    <div class="head"><div><h1>IP Inspector</h1><p>Everything about one address: who holds it, how it routes, what threat feeds and blocklists say, what it did here and who its neighbours are. Sources are asked only when you inspect, politely, and their answers are kept for hours. Nothing but the address leaves this machine.</p></div></div>
+    <form class="ins-search" id="insForm" role="search"><span class="ins-ic">${ICONS.search}</span><input class="input mono" id="insIp" name="ip" placeholder="an IPv4 or IPv6 address" value="${h(ip || "")}" autocomplete="off" spellcheck="false" inputmode="text" aria-label="Address to inspect"><button class="btn primary" type="submit">Inspect</button></form>
+    ${M?.recent?.length ? `<div class="ins-recent"><span class="faint small">Recent</span>${M.recent.map((r) => `<a href="#/inspect/${encodeURIComponent(r.ip)}" class="ins-chip" style="--k:${LEVEL[r.level]?.[0] || "#888"}">${flag(r.cc)} <span class="mono">${h(r.ip)}</span><i>${r.score}</i></a>`).join("")}</div>` : ""}
+    <div id="insBody">${ip ? '<p class="muted"><span class="spin"></span> Starting…</p>' : inspectIntro(M)}</div>`;
+  if (!ip) setTimeout(() => $("#insIp")?.focus(), 0);
+  if (ip) runInspect(ip, S.insFresh);
+  S.insFresh = false;
+}
+const inspectIntro = (M) => `<section class="card ins-intro"><h3>What it asks</h3><div class="ins-srclist">${(M?.sources || []).map((s) => `<div><b>${h(s.name)}</b>${s.needsKey ? ` <span class="pill ${M.abuseipdb ? "ok" : ""}">${M.abuseipdb ? "key set" : "needs a key"}</span>` : ""}<span class="muted small">${h(s.about)}</span></div>`).join("")}
+  <div><b>Bulwark itself</b><span class="muted small">Its log, profile, bans, blocklists, waves and campaigns, your devices, and the neighbours seen here (same /24, same network).</span></div></div>
+  <p class="faint small" style="margin:12px 0 0">Any address in the live log, the blocklist or the Patterns graph opens here too: click it, then <b>Full inspection</b>.</p></section>`;
+async function runInspect(ip, fresh) {
+  const tok = (S.insTok = {});
+  let v;
+  try { v = await api(`inspect/${encodeURIComponent(ip)}?wait=1500${fresh ? "&fresh=1" : ""}`); }
+  catch (e) { if (S.insTok === tok) $("#insBody").innerHTML = `<div class="card"><b class="st5">${h(e.message)}</b></div>`; return; }
+  for (;;) {
+    if (S.insTok !== tok || S.view !== "inspect") return;
+    S.ins = v; drawInspect(v);
+    if (!v.running) { loadInspect(); return; }                  // the recent list, for next time
+    await sleep(900);
+    try { v = await api(`inspect/${encodeURIComponent(ip)}`); } catch { /* the next one */ }
+  }
+}
+function gauge(score, level) {
+  const [col] = LEVEL[level] || ["#888"], r = 46, c = 2 * Math.PI * r, f = Math.max(0.02, score / 100);
+  return `<svg viewBox="0 0 120 120" class="gauge" aria-hidden="true"><circle cx="60" cy="60" r="${r}" fill="none" stroke="rgba(255,255,255,.07)" stroke-width="10"/>
+    <circle cx="60" cy="60" r="${r}" fill="none" stroke="${col}" stroke-width="10" stroke-linecap="round" stroke-dasharray="${(c * f).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 60 60)" style="filter:drop-shadow(0 0 6px ${col}88)"/>
+    <text x="60" y="66" text-anchor="middle" font-size="30" font-weight="700" fill="#e9ebee" font-family="Inter, system-ui, sans-serif">${score}</text></svg>`;
+}
+function timelineSvg(t) {
+  if (!t) return "";
+  const W = 720, H = 70, n = t.buckets.length, bw = W / n, max = Math.max(1, ...t.buckets.map((b) => b.pass + b.stopped));
+  const bars = t.buckets.map((b, i) => { const hp = (b.pass / max) * (H - 14), hs = (b.stopped / max) * (H - 14), x = (i * bw + 1).toFixed(1), w = Math.max(1, bw - 2).toFixed(1);
+    return `<rect x="${x}" y="${(H - hp - hs).toFixed(1)}" width="${w}" height="${hs.toFixed(1)}" rx="1.5" fill="#ff5a52"/><rect x="${x}" y="${(H - hp).toFixed(1)}" width="${w}" height="${hp.toFixed(1)}" rx="1.5" fill="#4b5563"/>${b.attack ? `<circle cx="${(i * bw + bw / 2).toFixed(1)}" cy="4" r="2.5" fill="#f2b53c"/>` : ""}`; }).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="ins-tl" role="img" aria-label="Its requests over time">${bars}</svg>
+    <div class="ins-tl-axis faint small"><span>${new Date(t.from).toLocaleString()}</span><span class="legend"><span><i style="background:#4b5563"></i>through</span><span><i style="background:#ff5a52"></i>stopped</span><span><i style="background:#f2b53c;border-radius:50%"></i>attack</span></span><span>${new Date(t.to).toLocaleString()}</span></div>`;
+}
+const yes = (b) => (b ? '<span class="st5">yes</span>' : '<span class="st2">no</span>');
+const mailto = (m) => `<a href="mailto:${h(m)}">${h(m)}</a>`;
+const osm = (lat, lon) => (lat != null && lon != null ? ` <a class="faint" href="https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=8/${lat}/${lon}" target="_blank" rel="noopener noreferrer">${(+lat).toFixed(2)}, ${(+lon).toFixed(2)}</a>` : "");
+// one source's answer, in a few lines
+function srcSummary(id, d) {
+  if (!d) return '<span class="faint">nothing on record</span>';
+  const kv = (rows) => `<dl class="kv tight">${rows.filter((r) => r && r[1] !== null && r[1] !== undefined && r[1] !== "").map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>`;
+  switch (id) {
+    case "ptr": return d.names.length ? d.names.map((n) => `<div class="mono small">${h(n.name)} ${n.confirmed ? '<span class="pill ok">confirmed</span>' : '<span class="pill drop" title="the name does not lead back to this address">not confirmed</span>'}</div>`).join("") : '<span class="faint">no PTR record</span>';
+    case "cymru": return kv([["Origin", d.asn ? `AS${d.asn} ${h(d.name || "")}` : "–"], ["Prefix", h(d.prefix)], ["Registry", h(`${d.registry || ""} ${d.cc ? `(${d.cc})` : ""}`)], ["Allocated", h(d.allocated)]]);
+    case "rdap": return kv([["Network", h(`${d.name || ""} ${d.handle && d.handle !== d.name ? `(${d.handle})` : ""}`)], ["Owner", h(d.registrant?.name)], ["Range", h(d.cidr?.join(", ") || (d.start ? `${d.start} – ${d.end}` : ""))],
+      ["Abuse", d.abuse ? `${h(d.abuse.name || "")} ${d.abuse.email ? d.abuse.email.split(", ").map(mailto).join(", ") : ""}${d.abuse.phone ? ` · ${h(d.abuse.phone)}` : ""}` : null], ["Type", h(d.type)], ["Country", h(d.country)],
+      ["Registered", d.registered ? h(d.registered.slice(0, 10)) : null], ["Changed", d.changed ? h(d.changed.slice(0, 10)) : null], ["Source", d.source ? `<a href="${h(d.source)}" target="_blank" rel="noopener noreferrer" class="faint">${h(d.source.replace(/^https?:\/\//, "").slice(0, 60))}</a>` : null]]);
+    case "ripestat": return kv([["Prefix", `${h(d.prefix)}${d.announced ? ' <span class="pill ok">announced</span>' : ""}`], ["Holder", h(d.holder ? `AS${d.asn} ${d.holder}` : null)], ["Seen by", d.visibility ? h(`${d.visibility.v4 || d.visibility.v6} RIS peers`) : null],
+      ["First routed", d.firstSeen ? h(d.firstSeen.slice(0, 10)) : null], ["RPKI", d.rpki ? `<span class="pill ${d.rpki === "valid" ? "ok" : d.rpki === "invalid" ? "block" : ""}">${h(d.rpki)}</span>` : null], ["Location", d.geo ? `${h([d.geo.city, d.geo.country].filter(Boolean).join(", "))}${osm(d.geo.lat, d.geo.lon)}` : null],
+      ["Abuse", d.abuse?.length ? d.abuse.map(mailto).join(", ") : null], ["Blocklists", d.blocklists?.length ? d.blocklists.map((b) => `<span class="pill block">${h(b.list)}</span>`).join(" ") : "none"],
+      ["AS prefixes", d.asPrefixes?.count ? `${fmtN(d.asPrefixes.count)} <span class="faint mono small">${h(d.asPrefixes.sample.slice(0, 4).join(" "))}${d.asPrefixes.count > 4 ? " …" : ""}</span>` : null], ["Block", h(d.block)]]);
+    case "internetdb": return !d.seen ? '<span class="faint">nothing indexed: no open service found</span>' : kv([["Ports", d.ports.map((p) => `<span class="pill">${p}</span>`).join(" ") || "–"], ["Vulnerabilities", d.vulns.length ? d.vulns.slice(0, 8).map(cveLink).join(" ") + (d.vulns.length > 8 ? ` <span class="faint">+${d.vulns.length - 8}</span>` : "") : "none known"],
+      ["Software", d.cpes.length ? `<span class="mono small">${h(d.cpes.slice(0, 5).join(" · "))}</span>` : null], ["Tags", d.tags.length ? d.tags.map((t) => `<span class="pill ${/compromised|malware|c2/.test(t) ? "block" : ""}">${h(t)}</span>`).join(" ") : null], ["Names", d.hostnames.length ? `<span class="mono small">${h(d.hostnames.slice(0, 4).join(", "))}</span>` : null]]);
+    case "greynoise": return !d.seen ? '<span class="faint">never seen scanning the internet, not a known service</span>' : kv([["Verdict", `<span class="pill ${d.classification === "malicious" ? "block" : d.benign ? "ok" : "drop"}">${h(d.classification || (d.benign ? "benign" : "unknown"))}</span>`], ["Scanner", yes(d.scanner)], ["Known service", d.benign ? `<span class="st2">yes${d.name ? `: ${h(d.name)}` : ""}</span>` : "no"], ["Last seen", h(d.lastSeen)]]);
+    case "otx": return kv([["Pulses", d.pulses ? `<b class="st5">${d.pulses}</b>` : "none"], ["Latest", d.list?.length ? d.list.slice(0, 4).map((p) => `<div class="small"><a href="https://otx.alienvault.com/pulse/${h(p.id)}" target="_blank" rel="noopener noreferrer">${h(p.name)}</a> <span class="faint">${h((p.created || "").slice(0, 10))}</span></div>`).join("") : null],
+      ["Malware", d.families?.length ? d.families.map((x) => `<span class="pill block">${h(x)}</span>`).join(" ") : null], ["Whitelisted", d.whitelisted?.length ? `<span class="st2">${h(d.whitelisted.join(", "))}</span>` : null]]);
+    case "abuseipdb": return kv([["Confidence", `<b class="${d.score >= 50 ? "st5" : d.score ? "st4" : "st2"}">${d.score}%</b>${d.whitelisted ? ' <span class="pill ok">whitelisted</span>' : ""}`], ["Reports", `${fmtN(d.reports)} by ${fmtN(d.users)} users${d.last ? ` · last ${h(d.last.slice(0, 10))}` : ""}`],
+      ["Usage", h(d.usage)], ["ISP", h(`${d.isp || ""}${d.domain ? ` (${d.domain})` : ""}`)], ["For", d.categories?.length ? d.categories.slice(0, 6).map((c) => `<span class="pill">${h(c.name)} ×${c.n}</span>`).join(" ") : null],
+      ["Recent", d.comments?.length ? d.comments.slice(0, 3).map((c) => `<div class="small ins-comment"><span class="faint">${h((c.at || "").slice(0, 10))}${c.cc ? ` · ${h(c.cc)}` : ""}</span> ${h(c.comment || "(no comment)")}</div>`).join("") : null]]);
+    case "dnsbl": { const all = Object.values(d), listed = all.filter((x) => x.listed), err = all.filter((x) => x.error);
+      return `${listed.length ? listed.map((x) => `<div><span class="pill block">${h(x.name)}</span> <span class="small">${h(x.why.join(", "))}</span></div>`).join("") : '<div class="st2">on none of them</div>'}
+        <div class="faint small" style="margin-top:6px">${all.filter((x) => !x.listed && !x.error).map((x) => h(x.name)).join(" · ")}${err.length ? ` · couldn't ask: ${err.map((x) => `${h(x.name)} (${h(x.error)})`).join(", ")}` : ""}</div>`; }
+    case "tor": return kv([["Exit", yes(d.exit)], ["Relay", d.relay ? `<span class="mono">${h(d.relay.nickname)}</span> ${d.relay.flags.map((f) => `<span class="pill">${h(f)}</span>`).join(" ")}` : "not a relay"], ["Contact", d.relay?.contact ? h(d.relay.contact.slice(0, 120)) : null], ["Last seen", d.relay ? h(d.relay.lastSeen) : null]]);
+    case "sfs": return d.reports ? `<b class="st4">${d.reports}</b> report${d.reports === 1 ? "" : "s"}${d.lastSeen ? `, last ${h(d.lastSeen)}` : ""}${d.confidence ? ` · confidence ${d.confidence}%` : ""}` : '<span class="st2">no reports</span>';
+    case "ipinfo": return kv([["Where", `${h([d.city, d.region, d.country].filter(Boolean).join(", "))}${osm(d.lat, d.lon)}`], ["Network", h(d.org)], ["Host name", d.hostname ? `<span class="mono small">${h(d.hostname)}</span>` : null], ["Time zone", h(d.timezone)], ["Anycast", d.anycast ? "yes" : null]]);
+    case "ipwhois": return kv([["Where", `${h([d.city, d.region, d.country].filter(Boolean).join(", "))}${osm(d.lat, d.lon)}`], ["ISP", h(d.isp)], ["Org", h(d.org)], ["AS", d.asn ? `AS${d.asn}` : null], ["Domain", h(d.domain)], ["Time zone", h(d.timezone)]]);
+  }
+  return `<pre class="raw">${h(JSON.stringify(d, null, 2))}</pre>`;
+}
+function drawInspect(v) {
+  const body = $("#insBody");
+  if (!body) return;
+  const Sm = v.summary, lv = LEVEL[Sm.level] || ["#888", Sm.level], H = v.here, P = H?.profile;
+  const srcs = Object.values(v.sources), done = srcs.filter((x) => x.state !== "pending").length;
+  const open = (S.insOpen ||= new Set());
+  const nb = v.neighbours;
+  const nbList = (rows) => rows.length ? `<div class="scroll ins-nb"><table><tbody>${rows.slice(0, 40).map((x) => `<tr class="click" data-act="ip" data-ip="${h(x.ip)}"><td class="nowrap">${ipBtn(x.ip, x.cc)}</td><td>${x.cats.slice(0, 3).map((c) => catPill(c)).join(" ")}</td><td class="mono faint">${fmtN(x.n)}</td><td>${x.banned ? '<span class="pill ban">banned</span>' : ""}</td><td class="faint small nowrap">${ago(x.last)}</td></tr>`).join("")}</tbody></table></div>` : '<p class="faint small">Nobody else seen here.</p>';
+  const groups = [...new Set(v.links.map((l) => l.group))];
+  body.innerHTML = `
+    <section class="card ins-hero" style="--lv:${lv[0]}">
+      <div class="ins-id">
+        <div class="ins-kicker">${v.version === 6 ? "IPv6" : "IPv4"} address${v.private ? " · private" : ""}${Sm.anycast ? " · anycast" : ""}</div>
+        <h2 class="ins-ip">${flag(Sm.country)} <span class="mono">${h(v.ip)}</span></h2>
+        <div class="ins-sub">${Sm.hostname ? `<span class="mono">${h(Sm.hostname)}</span>` : '<span class="faint">no reverse DNS</span>'}${Sm.asn ? ` · <b>AS${Sm.asn}</b> ${h(Sm.asName || "")}` : ""}${Sm.prefix ? ` · <span class="mono">${h(Sm.prefix)}</span>` : ""}</div>
+        <div class="ins-sub muted">${h([...new Set([Sm.owner, [Sm.city, Sm.country].filter(Boolean).join(", "), Sm.usage, Sm.isp])].filter((x) => x && !String(Sm.asName || "").toLowerCase().includes(String(x).toLowerCase())).join(" · "))}</div>
+        <div class="row ins-tags">${H?.ban ? '<span class="pill ban">banned here</span>' : ""}${H?.trusted || H?.devices?.length ? '<span class="pill ok">yours</span>' : ""}${H?.allowed ? '<span class="pill ok">allowed</span>' : ""}${Sm.tor ? '<span class="pill drop">Tor exit</span>' : ""}
+          ${Sm.ports.length ? `<span class="pill">${Sm.ports.length} open port${Sm.ports.length === 1 ? "" : "s"}</span>` : ""}${Sm.vulns ? `<span class="pill block">${Sm.vulns} known vulns</span>` : ""}${(H?.lists || []).filter((l) => l.id !== "tor").map((l) => `<span class="pill ${l.strength === "strong" ? "block" : "drop"}">${h(l.name)}</span>`).join("")}${(H?.cats || []).slice(0, 5).map((c) => catPill(c.id)).join("")}</div>
+        <div class="row ins-actions">
+          <button class="btn" data-act="insfresh" data-ip="${h(v.ip)}">${v.running ? '<span class="spin"></span> Scanning' : "Scan again"}</button>
+          <a class="btn ghost" href="api/inspect/${encodeURIComponent(v.ip)}/export" download>Export JSON</a>
+          ${v.private ? "" : H?.ban ? `<button class="btn ghost" data-act="unban" data-ip="${h(v.ip)}">Unban</button>` : `<button class="btn danger" data-act="ban" data-ip="${h(v.ip)}">Ban</button>`}
+          <button class="btn ghost" data-act="ip" data-ip="${h(v.ip)}">Drawer</button><button class="btn ghost" data-act="logf" data-k="ip" data-v="${h(v.ip)}">Its log</button></div>
+      </div>
+      <div class="ins-verdict">${gauge(Sm.score, Sm.level)}<b style="color:${lv[0]}">${h(lv[1])}</b><span class="faint small">risk ${Sm.score} / 100</span></div>
+    </section>
+    <div class="ins-progress ${v.running ? "on" : ""}"><span>${v.running ? `<span class="spin"></span> Asking ${srcs.length - done} more source${srcs.length - done === 1 ? "" : "s"}…` : `${done} sources · ${new Date(v.at).toLocaleTimeString()}`}</span>
+      <span class="faint">${srcs.filter((x) => x.state === "ok").length} answered · ${srcs.filter((x) => x.cached).length} from cache · ${srcs.filter((x) => x.state === "error").length} failed · ${srcs.filter((x) => x.state === "skipped").length} skipped</span><i style="width:${(100 * done) / srcs.length}%"></i></div>
+    <div class="grid ins-two">
+      <section class="card"><h3>Why <span class="faint">every reason, and what it weighed</span></h3>
+        ${Sm.why.length ? `<ul class="ins-why">${Sm.why.map((w) => `<li><span class="w ${w.w < 0 ? "neg" : w.w === 0 ? "zero" : ""}">${w.w > 0 ? "+" : ""}${w.w}</span><span class="t">${h(w.text)}</span><span class="wsrc">${h(w.source)}</span></li>`).join("")}</ul>` : `<p class="muted small">${v.running ? "Waiting for the sources…" : "Nothing against it anywhere."}</p>`}</section>
+      <section class="card"><h3>Facts</h3><dl class="kv">
+        <dt>Network</dt><dd>${Sm.asn ? `AS${Sm.asn} ${h(Sm.asName || "")}` : "–"}</dd><dt>Prefix</dt><dd class="mono">${h(Sm.prefix || "–")}</dd>
+        <dt>Owner</dt><dd>${h(Sm.owner || "–")}${Sm.netName && Sm.netName !== Sm.owner ? ` <span class="faint mono small">${h(Sm.netName)}</span>` : ""}</dd>
+        <dt>Abuse contact</dt><dd>${Sm.abuse.length ? Sm.abuse.map(mailto).join(", ") : "–"}</dd>
+        <dt>Registry</dt><dd>${h([Sm.registry, Sm.allocated ? `allocated ${String(Sm.allocated).slice(0, 10)}` : null].filter(Boolean).join(" · ") || "–")}</dd>
+        <dt>Reverse DNS</dt><dd>${Sm.ptr.length ? Sm.ptr.map((n) => `<span class="mono">${h(n.name)}</span> ${n.confirmed ? "✓" : '<span class="st4" title="not confirmed forward">?</span>'}`).join("<br>") : "–"}</dd>
+        <dt>Where</dt><dd>${h([Sm.city, Sm.country].filter(Boolean).join(", ") || "–")}${osm(Sm.lat, Sm.lon)}</dd>
+        <dt>Open ports</dt><dd>${Sm.ports.length ? Sm.ports.map((p) => `<span class="pill">${p}</span>`).join(" ") : "none indexed"}</dd>
+        ${Sm.here ? `<dt>Here</dt><dd>${fmtN(Sm.here.requests)} requests · first ${new Date(Sm.here.first).toLocaleDateString()} · last ${ago(Sm.here.last)}</dd>` : ""}</dl></section>
+    </div>
+    <section class="card ins-here"><h3>Here <span class="faint">what it did on your hosts</span></h3>
+      ${P ? `<div class="grid g4 ins-stats"><div class="stat"><b>${fmtN(P.n)}</b><span>requests</span></div><div class="stat"><b>${fmtN((P.dec.drop || 0) + (P.dec.block || 0) + (P.dec.ban || 0))}</b><span>stopped</span></div>
+          <div class="stat"><b>${fmtN(Object.keys(P.sigs || {}).length)}</b><span>patterns</span></div><div class="stat"><b>${H.alerts.length}</b><span>waves &amp; campaigns</span></div></div>
+        ${timelineSvg(H.timeline)}
+        ${H.cats.length ? `<div class="row" style="margin-top:12px">${H.cats.map((c) => catPill(c.id, true).replace("</span>", ` ×${c.n}</span>`)).join("")}${(H.cves || []).map(cveLink).join("")}</div>` : ""}
+        ${H.ban ? `<p class="small" style="margin:12px 0 0"><span class="pill ban">banned</span> ${h(H.ban.reason)} <span class="faint">· ${ago(H.ban.at)}${H.ban.until ? ` · until ${new Date(H.ban.until).toLocaleDateString()}` : ""}</span></p>` : ""}
+        ${H.alerts.length ? `<div class="ins-waves">${H.alerts.map((a) => `<a href="#/waves" class="row"><span class="pill ${SEVP[a.sev]}">${h(a.sev)}</span><span class="pill">${h(a.kind)}</span>${h(a.title)} <span class="faint small">${fmtN(a.members)} addresses · ${ago(a.last)}</span></a>`).join("")}</div>` : ""}
+        <div class="scroll ins-log"><table class="logtable"><tbody>${H.logs.slice(0, 120).map((e) => `<tr class="d-${h(e.dec)}"><td class="faint mono">${new Date(e.t).toLocaleString()}</td><td>${decPill(e.dec)}</td><td class="mono path" title="${h(e.path)}"><span class="faint">${h((e.host || "").split(".")[0])}</span> ${h(e.m)} ${h(e.path)}</td><td>${e.sig ? catPill(e.cat || sigOf(e.sig)?.cat) : ""}</td><td class="mono st${String(e.st || 0)[0]}">${e.st || ""}</td></tr>`).join("")}</tbody></table></div>`
+      : '<p class="muted small">Never seen on your hosts.</p>'}</section>
+    <h3 class="ins-h">Sources <span class="faint">${srcs.length} asked · click "raw" for the full answer</span></h3>
+    <div class="ins-sources">${srcs.map((x) => `<article class="src s-${x.state}">
+        <header><b>${h(x.name)}</b><span class="spacer"></span>${x.state === "pending" ? '<span class="spin"></span>' : `<span class="pill ${x.state === "ok" ? "ok" : x.state === "error" ? "block" : ""}">${x.state === "ok" ? (x.cached ? "cached" : "ok") : h(x.state)}</span>`}${x.took != null && x.state !== "pending" ? `<span class="faint small mono">${x.took} ms</span>` : ""}</header>
+        <div class="src-body">${x.state === "ok" ? srcSummary(x.id, x.data) : x.state === "error" ? `<span class="st5 small">${h(x.error)}</span>` : x.state === "skipped" ? `<span class="faint small">${h(x.why || "skipped")}</span>` : '<span class="faint small">asking…</span>'}</div>
+        ${x.raw ? `<details data-open="${h(x.id)}" ${open.has(x.id) ? "open" : ""}><summary>raw</summary><pre class="raw">${h(JSON.stringify(x.raw, null, 2))}</pre></details>` : ""}
+      </article>`).join("")}</div>
+    ${nb ? `<div class="grid g2 ins-nbs">
+      <section class="card"><h3>Same ${v.version === 6 ? "/48" : "/24"} <span class="faint mono">${h(nb.net || "")}</span> <span class="faint">${fmtN(nb.sameCount)} seen · ${fmtN(nb.sameBanned)} banned</span></h3>${nbList(nb.same)}</section>
+      <section class="card"><h3>Same network <span class="faint">${nb.asn ? `AS${nb.asn} ${h(nb.asnName || "")} · ` : ""}${fmtN(nb.networkCount)} seen · ${fmtN(nb.networkBanned)} banned</span></h3>${nb.asn ? nbList(nb.network) : '<p class="faint small">Network unknown.</p>'}</section></div>` : ""}
+    <section class="card"><h3>Look further <span class="faint">opens in a new tab, without telling them where you came from</span></h3>
+      <div class="ins-links">${groups.map((g) => `<div><span class="faint small">${h(g)}</span>${v.links.filter((l) => l.group === g).map((l) => `<a class="btn sm ghost" href="${h(l.url)}" target="_blank" rel="noopener noreferrer">${h(l.name)} ${ICONS.ext}</a>`).join("")}</div>`).join("")}</div></section>
+    <section class="card ins-sent"><details data-open="__sent" ${open.has("__sent") ? "open" : ""}><summary>What left this machine for this scan <span class="faint">${v.sent.length} request${v.sent.length === 1 ? "" : "s"}, plus DNS lookups · only the address (and its network)</span></summary>
+      <div class="scroll"><table><tbody>${v.sent.map((c) => `<tr><td class="faint mono small nowrap">${new Date(c.at).toLocaleTimeString()}</td><td class="mono small">${h(c.host)}</td><td class="mono small path" title="${h(c.path)}">${h(c.path)}</td></tr>`).join("") || '<tr><td class="faint small">Nothing yet (or all from cache).</td></tr>'}</tbody></table></div></details></section>`;
+}
+
 // ------------------------------------------------------------------ chrome, routing, live
 function chrome() {
   const o = S.ov;
@@ -478,7 +660,7 @@ function chrome() {
   $("#railFoot").innerHTML = `<div><b>${o.sensors.length}</b> ${o.sensors.length === 1 ? "host" : "hosts"} guarded</div><div><b>${fmtN(o.lists.total)}</b> on ${o.lists.loaded} lists</div><div class="faint">v${h(o.version)}</div>`;
 }
 const VIEWS = { overview: [loadOverview, renderOverview], log: [loadLog, renderLog], waves: [loadWaves, renderWaves], patterns: [null, renderPatterns],
-                devices: [loadDevices, renderDevices], addresses: [loadBl, renderBl], lists: [null, renderLists], vendors: [null, renderVendors], settings: [null, renderSettings] };
+                devices: [loadDevices, renderDevices], addresses: [loadBl, renderBl], lists: [null, renderLists], vendors: [null, renderVendors], settings: [null, renderSettings], inspect: [loadInspect, renderInspect] };
 async function show(view) {
   S.view = VIEWS[view] ? view : "overview";
   for (const a of document.querySelectorAll("#nav a")) a.classList.toggle("on", a.dataset.v === S.view);
@@ -494,6 +676,9 @@ function route() {
   // #/ip/<address> (a notice on the host's dashboard links here): the address, over the overview
   const ip = /^#\/ip\/(.+)$/.exec(location.hash)?.[1];
   if (ip) { if (S.view !== "overview" || !S.ov) show("overview"); openIp(decodeURIComponent(ip)); return; }
+  // #/inspect/<address>: the Inspector, on it
+  const ins = /^#\/inspect(?:\/(.+))?$/.exec(location.hash);
+  if (ins) { closeDrawer(); S.insIp = ins[1] ? decodeURIComponent(ins[1]).trim() : ""; show("inspect"); return; }
   show((location.hash.replace(/^#\/?/, "") || "overview").split("?")[0]);
 }
 window.addEventListener("hashchange", route);
@@ -502,7 +687,7 @@ setInterval(() => { if (!document.hidden) loadDevices(true).catch(() => {}); }, 
 
 // refresh what's on screen (not the log: that one is live)
 setInterval(async () => {
-  if (document.hidden || S.view === "log" || S.view === "patterns" || S.view === "settings" || S.view === "vendors") return;
+  if (document.hidden || S.view === "log" || S.view === "patterns" || S.view === "settings" || S.view === "vendors" || S.view === "inspect") return;
   try {
     if (S.view === "overview") { await loadOverview(); renderOverview(); }
     else { const o = await api("overview?span=1h"); S.ov = S.ov ? { ...S.ov, alerts: o.alerts, bans: o.bans, sensors: o.sensors, lists: o.lists, version: o.version } : o; chrome();
@@ -549,6 +734,8 @@ document.addEventListener("click", async (e) => {
     }
     else if (act === "ip") { e.stopPropagation(); openIp(ip); }
     else if (act === "closedrawer") closeDrawer();
+    else if (act === "goinspect") { e.stopPropagation(); closePop(); location.hash = el.getAttribute("href"); }
+    else if (act === "insfresh") { S.insFresh = true; if (S.view === "inspect" && S.insIp === ip) runInspect(ip, true); else location.hash = `#/inspect/${encodeURIComponent(ip)}`; }
     else if (act === "devname") {
       const d = S.devices.find((x) => x.id === el.dataset.id), name = prompt("A name for this device (empty: its browser and system)", d?.named ? d.name : "");
       if (name !== null) { await hostDevices("PATCH", el.dataset.id, { name }); toast("Renamed"); }
@@ -579,9 +766,20 @@ document.addEventListener("click", async (e) => {
     else if (act === "savealerts") { await api("settings", { method: "PUT", body: JSON.stringify({ ntfy: $("#sNtfy").value, webhook: $("#sHook").value, keepDays: Number($("#sKeep").value) }) }); toast("Saved"); }
   } catch (ex) { toast(ex.message); }
 });
+// the Inspector's search, and which raw answers are open (kept across its repaints)
+document.addEventListener("submit", (e) => {
+  if (e.target.id !== "insForm") return;
+  e.preventDefault();
+  const ip = $("#insIp").value.trim().replace(/^\[|\]$/g, "");
+  if (!ip) return;
+  if (S.insIp === ip && S.view === "inspect") runInspect(ip, true);
+  else location.hash = `#/inspect/${encodeURIComponent(ip)}`;
+});
+document.addEventListener("toggle", (e) => { const id = e.target?.dataset?.open; if (id) { const o = (S.insOpen ||= new Set()); if (e.target.open) o.add(id); else o.delete(id); } }, true);
 async function refreshAfter(ip) {
   if (S.ip?.ip === ip) { S.ip = await api("ip/" + encodeURIComponent(ip)); drawIp(); }
   if (S.view === "addresses") { await loadBl(); renderBl(); }
+  if (S.view === "inspect" && S.insIp === ip) runInspect(ip);
 }
 document.addEventListener("change", async (e) => {
   const el = e.target;
@@ -600,6 +798,7 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && e.target.id === "allowIp") $('[data-act="allowit"]').click();
 });
 
-api("lists").then((l) => { S.sigs = l.signatures; S.lists = l; if (S.view === "overview" && S.series) drawHeat($("#cHeat"), S.series); }).catch(() => {});
+api("lists").then((l) => { S.sigs = l.signatures; S.lists = l; S.cats = l.categories || []; S.catMap = new Map(S.cats.map((c) => [c.id, c])); S.sigMap = new Map(S.sigs.map((x) => [x.id, x]));
+  if (S.view === "log") renderLog(); if (S.view === "overview" && S.series) drawHeat($("#cHeat"), S.series); }).catch(() => {});
 live();
 route();
