@@ -17,6 +17,7 @@
   <b><a href="#-attack-categories">Categories</a></b> ·
   <b><a href="#-the-ip-inspector">IP Inspector</a></b> ·
   <b><a href="#-the-dashboard">Dashboard</a></b> ·
+  <b><a href="#-email-alerts-with-selfmail">Email alerts</a></b> ·
   <b><a href="#-install">Install</a></b>
 </p>
 
@@ -151,6 +152,16 @@ Every lookup has a timeout, every answer is cached per source (one to 24 hours),
 
 Inside Aegis × Burrow it lives at `https://<dashboard>/__gate/bulwark/`, behind the gateway's login. Standalone, it's at `http://127.0.0.1:4370/?k=<key>` (`bulwark url`). It runs under a strict Content-Security-Policy, with no inline scripts and nothing loaded from elsewhere.
 
+## ✦ Email alerts (with selfmail)
+
+When the **selfmail** addon (a mail server for your own domain) is installed and running, Settings gets an **Email alerts** section; without it, nothing about email shows anywhere. It is off until you turn it on.
+
+- **What you get:** waves and surges; new campaigns and strict mode; critical events (no guard connected for 5 minutes, the app restarting after a crash or failing again and again); and, if you ask, a daily digest at 8:00. Each can be turned off, and the recipient changed (it defaults to selfmail's own address). **Send a test email** shows it works.
+- **What's in one:** requests a minute against the hour before, attacks a minute, how many of the wave's addresses are banned, the top networks (with their AS) and patterns, strict mode, the forecast, and a link to the dashboard when Bulwark knows it (Aegis tells it; or set `"dashboard"` in `bulwark.json`). HTML that every mail client shows the same (tables, inline styles, no images or web fonts), with a plain-text twin.
+- **How often:** a wave goes out within seconds, then at most one email every 15 minutes: everything in between is summed up in the next one (a wave turning critical waits only a minute). Critical events at most every 30 minutes, and never more than 12 emails an hour in all. If selfmail says to slow down, Bulwark waits 15 minutes and keeps what it had.
+
+**How it finds selfmail:** selfmail announces itself in the Weft mesh (`~/.config/weft/mesh/selfmail.json`, or `$MESH`), refreshed every 30 s; an entry older than 90 s means it isn't running. Bulwark posts to the `notify.url` it gives, with the key from its `notify.keyFile` (plain http only to this machine), and selfmail sends it from `"Bulwark" <bulwark@your domain>`. Ntfy, the webhook and Aegis's bell work as before, with or without email.
+
 ## ✦ How it fits together
 
 **The guard** runs inside the gateway (Burrow loads `sensor/burrow.mjs` as an extension): the engine, bans, about 250 000 blocklisted addresses held as sorted ranges (a binary search per list), and behaviour. When the response is done, the host's `observe` hook tells it what the app answered (the 4xx-aware signals) and sends one log line to the app.
@@ -177,6 +188,6 @@ bulwark ban IP [why]      bulwark unban IP · bulwark allow IP
 bulwark log [-f]          the latest requests (follow)
 ```
 
-`~/.config/bulwark/bulwark.json` holds the port and key. `~/.local/share/bulwark/` holds `feeds/` (the lists), `asn/` (the network database, from iptoasn.com), `logs/` (every request), `state/` (bans, settings, alerts, profiles) and `run/sensor.sock` (guard ↔ app).
+`~/.config/bulwark/bulwark.json` holds the port and key (and, optionally, `dashboard`: the dashboard's URL for links in emails). `~/.local/share/bulwark/` holds `feeds/` (the lists), `asn/` (the network database, from iptoasn.com), `logs/` (every request), `state/` (bans, settings, alerts, profiles, emails) and `run/sensor.sock` (guard ↔ app).
 
 MIT licensed.

@@ -2,8 +2,8 @@
   "spec": 1,
   "id": "bulwark",
   "name": "Bulwark",
-  "version": "1.7.0",
-  "description": "A shield for everything you publish. Every request is decoded and judged in microseconds by an attack engine with 21 categories and 44 known CVE exploits, scored CRS-style with per-address behaviour, and checked against 250k+ blocklisted addresses; attackers are banned on every tunnel at once. Its own dashboard shows every request in full, warns about waves, graphs the patterns, inspects any IP across a dozen free sources and reports attackers to the vendors that missed them.",
+  "version": "1.8.0",
+  "description": "A shield for everything you publish. Every request is decoded and judged in microseconds by an attack engine with 21 categories and 44 known CVE exploits, scored CRS-style with per-address behaviour, and checked against 250k+ blocklisted addresses; attackers are banned on every tunnel at once. Its own dashboard shows every request in full, warns about waves, graphs the patterns, inspects any IP across a dozen free sources and reports attackers to the vendors that missed them. With the selfmail addon, it emails you about waves too.",
   "author": "Alexd Aero",
   "license": "MIT",
   "homepage": "https://github.com/alexd-aero/bulwark",
@@ -12,15 +12,15 @@
     "theme": "red",
     "icon": "shield",
     "style": "glow",
-    "badge": "PROTECTION",
+    "badge": "EMAIL ALERTS",
     "title": "{name} {version}",
-    "tagline": "A stronger engine: every attack named and scored, encodings seen through, and an IP Inspector for any address.",
+    "tagline": "With the selfmail addon installed, Bulwark can email you when a wave hits, and when the guard goes down.",
     "highlights": [
-      "21 attack categories (SQLi, SSRF, RCE, web shells, IoT…) with MITRE, OWASP and 44 CVEs tagged",
-      "Sees through encoding tricks: double URL encoding, overlong UTF-8, %u, look-alikes, entities",
-      "SQLi and XSS judged by shape; hits add up CRS-style; probes count only if the app says 404",
-      "Catches wordlist scanning, credential stuffing and floods per address, in bounded memory",
-      "IP Inspector: RDAP, RIPEstat, Shodan, GreyNoise, OTX, DNSBLs and more, one scored report"
+      "Email alerts through selfmail: shown only when it's installed, off until you turn them on",
+      "Wave emails: requests a minute against normal, top networks and patterns, how many banned",
+      "One email at once, then at most one every 15 minutes with everything in between summed up",
+      "Critical emails when the guard disconnects, or the app crashes or keeps failing",
+      "Choose the recipient and the events, add a daily digest, send a test from Settings"
     ],
     "button": "Update to {version}",
     "notes": "https://github.com/alexd-aero/bulwark/commits/main"

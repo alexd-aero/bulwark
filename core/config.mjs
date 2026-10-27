@@ -1,5 +1,5 @@
 // Where Bulwark keeps things, and how its parts find each other.
-//   ~/.config/bulwark/bulwark.json   {home, port, bind, key, access}: written once, read by
+//   ~/.config/bulwark/bulwark.json   {home, port, bind, key, access, dashboard?}: written once, read by
 //                                    the app, the sensor inside a host, the CLI
 //   <home>/feeds  lists   <home>/asn  network database   <home>/logs  every request
 //   <home>/state  bans, settings, alerts   <home>/run/sensor.sock  sensor <-> app
@@ -22,6 +22,8 @@ export function loadConfig({ create = false } = {}) {
     key: c.key || null,
     // "key": the key opens it (a link, then a cookie); "host": only a host's header does
     access: c.access === "host" ? "host" : "key",
+    // the dashboard's URL, for links in emails (optional: a host like Aegis tells it)
+    dashboard: typeof c.dashboard === "string" && /^https?:\/\/\S+$/.test(c.dashboard) ? c.dashboard : null,
   };
   if (create && (!c.key || !existsSync(CONFIG_FILE))) {
     out.key = out.key || randomBytes(24).toString("base64url");

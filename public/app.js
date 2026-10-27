@@ -1,8 +1,8 @@
 // Bulwark's dashboard. Plain modules, no build step, no inline handlers (strict CSP):
 // everything is wired through data-act attributes and one delegated listener.
 // All paths are relative, so it works at / and under a host's mount (/__gate/bulwark/).
-import { TimeChart, Heatmap, fmtN, netName } from "./charts.js?v=1.7.0";
-import { Workflow } from "./graph.js?v=1.7.0";
+import { TimeChart, Heatmap, fmtN, netName } from "./charts.js?v=1.8.0";
+import { Workflow } from "./graph.js?v=1.8.0";
 
 const $ = (s, el = document) => el.querySelector(s);
 const app = $("#app");
@@ -25,6 +25,7 @@ const ICONS = {
   device: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="2" y="4" width="14" height="10" rx="1.5"/><path d="M6 18h6M9 14v4"/><rect x="17" y="8" width="5" height="12" rx="1.2"/></svg>',
   phone: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="6.5" y="2.5" width="11" height="19" rx="2.2"/><path d="M10.5 18.5h3"/></svg>',
   laptop: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="4" y="4.5" width="16" height="11" rx="1.5"/><path d="M2 19.5h20"/></svg>',
+  mail: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.2"/><path d="m3.8 6.8 8.2 6.2 8.2-6.2"/></svg>',
   gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>',
 };
 for (const i of document.querySelectorAll("[data-i]")) i.innerHTML = ICONS[i.dataset.i] || "";
@@ -408,7 +409,54 @@ async function renderSettings() {
         ${sw("hostNotices", "Warnings on your Aegis dashboard", "Waves and bans show up under the bell on Aegis × Burrow's dashboard (a critical wave as a banner too). One notice a minute at most for bans.")}
         <div class="switchrow"><div class="grow"><b>What the host remembers</b><span class="muted small">Every tunnel's clients and recent requests and the sign-in log, from before Bulwark was there: pulled in when Bulwark connects. Attackers in it are banned by the same rules.${hl ? `<br>Last: ${ago(hl.at)} · ${fmtN(hl.rows)} new lines · ${fmtN(hl.ips)} addresses${hl.banned?.length ? ` · banned ${hl.banned.map(h).join(", ")}` : ""}` : "<br>Not pulled yet."}</span></div>
           <button class="btn sm" data-act="pullhistory">Pull now</button></div></section>
-    </div>`;
+    </div>
+    ${s.email ? emailCard(s, sw) : ""}`;
+}
+// Email alerts: only while the selfmail addon is there (the API says email: null otherwise).
+// Off: a card asking to turn it on. On: who gets it, which events, selfmail's state.
+function emailCard(s, sw) {
+  const e = s.email, sm = e.selfmail, L = e.limits || {};
+  const from = sm.domains?.[0] ? `Bulwark &lt;bulwark@${h(sm.domains[0])}&gt;` : "Bulwark";
+  if (!s.mailOn) return `
+    <section class="card mail-cta" id="emailAlerts">
+      <span class="mail-ic">${ICONS.mail}</span>
+      <div class="grow">
+        <h3>Email alerts <span class="pill ok">selfmail${sm.version ? " " + h(sm.version) : ""} is here</span></h3>
+        <p>Get an email when a wave hits: requests a minute against normal, the networks behind it, the patterns they try and how many are banned, with a link back here. And when the guard goes down or the app keeps failing.</p>
+        <p class="faint small">To <b class="mono">${h(e.to || "selfmail's address")}</b>, from ${from}. At most one about waves every ${L.waveMinutes || 15} minutes; what happens in between is summed up in the next. Off until you turn it on.</p>
+      </div>
+      <div class="mail-actions"><button class="btn primary" data-act="mailon">Turn on email alerts</button><button class="btn ghost" data-act="mailtest">Send a test email</button></div>
+    </section>`;
+  const last = e.lastSent, err = e.lastError;
+  return `
+    <section class="card mail-on" id="emailAlerts">
+      <h3><span class="mail-ic sm">${ICONS.mail}</span> Email alerts <span class="pill ok">on</span><span class="faint">through selfmail${sm.version ? " " + h(sm.version) : ""}</span><span class="spacer"></span>
+        <span class="switch" title="Email alerts"><input type="checkbox" data-act="mailsw" checked aria-label="Email alerts"><i></i></span></h3>
+      <div class="mail-grid">
+        <div>
+          <div class="field"><span>Send to${e.defaultTo ? ` (empty: <span class="mono">${h(e.defaultTo)}</span>, selfmail's own)` : ""}</span>
+            <div class="row"><input class="input mono grow" id="mTo" type="email" value="${h(s.mailTo)}" placeholder="${h(e.defaultTo || "you@example.com")}" aria-label="Send email alerts to" autocomplete="off" spellcheck="false"><button class="btn" data-act="mailto">Save</button></div></div>
+          ${sw("mailWaves", "Waves and surges", "Surges against the usual traffic, clusters from one network, a name suddenly found.")}
+          ${sw("mailCampaigns", "New campaigns and strict mode", "Several addresses running the same attack; a critical wave turning strict mode on.")}
+          ${sw("mailCritical", "Critical", "The guard disconnected for 5 minutes, the app restarting after a crash, or failing again and again.")}
+          ${sw("mailDigest", "Daily digest", `Every day at ${L.digestHour ?? 8}:00: the last 24 hours in one email.`)}
+        </div>
+        <div class="mail-side">
+          <dl class="kv tight">
+            <dt>selfmail</dt><dd><span class="pill ok">found</span> ${h(sm.name)}${sm.version ? " " + h(sm.version) : ""} · seen ${ago(sm.seen)}</dd>
+            <dt>Sends to</dt><dd class="mono">${h(e.to || "–")}</dd>
+            <dt>From</dt><dd>${from}</dd>
+            <dt>Last sent</dt><dd>${last ? `${ago(last.at)} · ${h(last.subject || last.kind)}` : '<span class="faint">nothing yet</span>'}</dd>
+            ${err ? `<dt>Last error</dt><dd class="st5">${ago(err.at)} · ${h(err.error)}</dd>` : ""}
+            ${e.pending ? `<dt>Waiting</dt><dd>${e.pending} event${e.pending === 1 ? "" : "s"}${e.nextAt ? `, in the next email ${e.nextAt > Date.now() ? "in " + Math.max(1, Math.round((e.nextAt - Date.now()) / 60000)) + " min" : "soon"}` : ""}</dd>` : ""}
+            ${e.pausedUntil ? `<dt>Paused</dt><dd class="st4">until ${clock(e.pausedUntil)} (selfmail asked to slow down, or failed)</dd>` : ""}
+            <dt>This hour</dt><dd>${e.sentThisHour || 0} of ${L.perHour || 12}</dd>
+          </dl>
+          <div class="row" style="margin-top:14px"><button class="btn" data-act="mailtest">Send a test email</button></div>
+          <p class="faint small" style="margin:12px 0 0">A wave goes out within seconds, then at most one email every ${L.waveMinutes || 15} minutes: what happens in between is summed up in the next one (a wave turning critical waits only a minute). Critical events: at most every ${L.systemMinutes || 30} minutes.</p>
+        </div>
+      </div>
+    </section>`;
 }
 
 // ------------------------------------------------------------------ your devices
@@ -763,6 +811,13 @@ document.addEventListener("click", async (e) => {
     else if (act === "refreshlists") { el.disabled = true; el.innerHTML = '<span class="spin"></span> Updating…'; S.lists = await post("lists/refresh"); S.lists = await api("lists"); renderLists(); }
     else if (act === "savekey") { await api("settings", { method: "PUT", body: JSON.stringify({ abuseipdbKey: $("#abKey").value.trim() }) }); toast("Saved"); renderVendors(); }
     else if (act === "clearkey") { await api("settings", { method: "PUT", body: JSON.stringify({ abuseipdbKey: "" }) }); toast("Removed"); renderVendors(); }
+    else if (act === "mailon") { await api("settings", { method: "PUT", body: JSON.stringify({ mailOn: true }) }); toast("Email alerts on"); await renderSettings(); }
+    else if (act === "mailto") { await api("settings", { method: "PUT", body: JSON.stringify({ mailTo: $("#mTo").value.trim() }) }); toast("Saved"); await renderSettings(); }
+    else if (act === "mailtest") {
+      el.disabled = true; const was = el.innerHTML; el.innerHTML = '<span class="spin"></span> Sending…';
+      try { const r = await post("email/test"); toast(`Sent${r.to ? " to " + r.to : ""}`); } finally { el.disabled = false; el.innerHTML = was; }
+      if (S.view === "settings") await renderSettings();
+    }
     else if (act === "savealerts") { await api("settings", { method: "PUT", body: JSON.stringify({ ntfy: $("#sNtfy").value, webhook: $("#sHook").value, keepDays: Number($("#sKeep").value) }) }); toast("Saved"); }
   } catch (ex) { toast(ex.message); }
 });
@@ -783,7 +838,9 @@ async function refreshAfter(ip) {
 }
 document.addEventListener("change", async (e) => {
   const el = e.target;
-  if (el.dataset.act === "setting") {
+  if (el.dataset.act === "mailsw") {
+    try { await api("settings", { method: "PUT", body: JSON.stringify({ mailOn: el.checked }) }); toast(el.checked ? "Email alerts on" : "Email alerts off"); await renderSettings(); } catch (ex) { el.checked = !el.checked; toast(ex.message); }
+  } else if (el.dataset.act === "setting") {
     try { await api("settings", { method: "PUT", body: JSON.stringify({ [el.dataset.k]: el.checked }) }); toast("Saved"); } catch (ex) { el.checked = !el.checked; toast(ex.message); }
   } else if (el.dataset.act === "logsel") { S.logF[el.dataset.k] = el.value; await loadLog(); renderLog(); }
 });
@@ -796,6 +853,7 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") { if ($("#drawer").classList.contains("open")) closeDrawer(); else closePop(); }
   if (e.key === "Enter" && e.target.id === "banIp") $('[data-act="banit"]').click();
   if (e.key === "Enter" && e.target.id === "allowIp") $('[data-act="allowit"]').click();
+  if (e.key === "Enter" && e.target.id === "mTo") $('[data-act="mailto"]').click();
 });
 
 api("lists").then((l) => { S.sigs = l.signatures; S.lists = l; S.cats = l.categories || []; S.catMap = new Map(S.cats.map((c) => [c.id, c])); S.sigMap = new Map(S.sigs.map((x) => [x.id, x]));

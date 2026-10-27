@@ -9,6 +9,8 @@ import { join } from "node:path";
 import { connect } from "node:net";
 
 process.env.BULWARK_CONFIG = join(mkdtempSync(join(tmpdir(), "bw-cfg-")), "bulwark.json");
+// never the real Weft mesh: a selfmail running on this machine must not get test emails
+process.env.MESH = mkdtempSync(join(tmpdir(), "bw-mesh-"));
 const { startApp } = await import("../server.mjs");
 
 const home = mkdtempSync(join(tmpdir(), "bw-home-"));

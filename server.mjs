@@ -12,9 +12,10 @@
 //
 // API: GET overview | series?span= | logs?… | stream (SSE) | ip/IP | alerts |
 // graph?span= | blocklist | blocklist.txt?format=txt|cidr|nginx|iptables|csv|json |
-// lists | vendors | settings | status | inspect/IP[?fresh=1&wait=ms] | inspect/IP/export;
+// lists | vendors | settings | status | inspect/IP[?fresh=1&wait=ms] | inspect/IP/export |
+// email (null while the selfmail addon isn't there);
 // POST ip/IP/{ban,unban,allow,disallow,report} |
-// lists/refresh | alerts/close;  PUT settings
+// lists/refresh | alerts/close | email/test;  PUT settings
 
 import { createServer } from "node:http";
 import { createServer as createNetServer } from "node:net";
@@ -24,6 +25,7 @@ import { fileURLToPath } from "node:url";
 import { timingSafeEqual, createHash } from "node:crypto";
 import { loadConfig } from "./core/config.mjs";
 import { Brain, DEFAULT_SETTINGS } from "./core/brain.mjs";
+import { MAIL_KEYS, validAddress } from "./core/mail.mjs";
 import { checkIp } from "./core/intel.mjs";
 import { isIP, isPrivate, normIp, netOf } from "./core/net.mjs";
 import { signatureById, categoryOf, catalog, classify, matcherStats } from "./core/payloads.mjs";
@@ -36,9 +38,11 @@ const MIN = 60e3, HOUR = 60 * MIN, DAY = 24 * HOUR;
 const SPANS = { "15m": 15 * MIN, "1h": HOUR, "6h": 6 * HOUR, "24h": DAY, "7d": 7 * DAY, "30d": 30 * DAY, "90d": 90 * DAY };
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 
-export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", offline = false, remote, fetchImpl, quiet = false, inspectFetch, inspectDns } = {}) {
+// dashboard: the dashboard's URL for links in emails (else the host tells it);
+// mesh, mailFetch: where selfmail is looked for and how it's reached (tests)
+export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", offline = false, remote, fetchImpl, quiet = false, inspectFetch, inspectDns, dashboard, mesh, mailFetch } = {}) {
   const say = quiet ? () => {} : log;
-  const brain = new Brain({ home, log: say, offline, remote, fetchImpl }).start();
+  const brain = new Brain({ home, log: say, offline, remote, fetchImpl, dashboard, mesh, mailFetch, version: VERSION }).start();
   // the IP Inspector: on demand only, from the dashboard
   const inspector = new Inspector({ brain, fetchImpl: inspectFetch || fetchImpl, dns: inspectDns, offline: offline && !inspectFetch });
   const keyHash = createHash("sha256").update(String(key)).digest();
@@ -61,7 +65,7 @@ export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", 
         try { brain.onSensor(JSON.parse(line), s); } catch { /* a bad line */ }
       }
     });
-    s.on("close", () => brain.sensors.delete(s));
+    s.on("close", () => { brain.sensors.delete(s); brain.guardGone(); });
     s.on("error", () => {});
   });
   sensorSrv.listen(sockPath, () => { try { chmodSync(sockPath, 0o600); } catch { /* fine */ } });
@@ -80,6 +84,17 @@ export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", 
   const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png" };
 
   const enrich = (e) => e;
+  // the settings as the dashboard sees them: the AbuseIPDB key hidden; email only
+  // while selfmail is there (else no mail* keys at all, and email: null)
+  const settingsView = () => {
+    const email = brain.mailer.status(), out = { ...brain.settings, abuseipdbKey: brain.settings.abuseipdbKey ? "•".repeat(8) + brain.settings.abuseipdbKey.slice(-4) : "" };
+    if (!email) for (const k of MAIL_KEYS) delete out[k];
+    return { ...out, email };
+  };
+  const emailView = () => {
+    const email = brain.mailer.status();
+    return { email, settings: email ? Object.fromEntries(MAIL_KEYS.map((k) => [k, brain.settings[k]])) : null };
+  };
   const ipView = async (ip) => {
     const p = brain.profiles.get(ip);
     const intel = await checkIp(ip).catch((e) => ({ error: e.message }));
@@ -278,7 +293,7 @@ export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", 
         version: VERSION, now: Date.now(), span: q.span || "24h", totals: sum, bans: brain.bansList().length, stats: brain.state.stats,
         alerts: brain.waves.open().map(({ arrivals, ...a }) => a), strictUntil: brain.strictUntil, latency: brain.latency(), queue: brain.queue.length,
         sensors: [...brain.sensors].map((x) => x.info || {}), lists: { total: brain.feeds.total(), loaded: brain.feeds.lists.size, of: brain.feeds.view().length },
-        asn: brain.asn.view(), own: [...brain.own], settings: { ...brain.settings, abuseipdbKey: brain.settings.abuseipdbKey ? "set" : "" },
+        asn: brain.asn.view(), own: [...brain.own], settings: { ...Object.fromEntries(Object.entries(brain.settings).filter(([k]) => !MAIL_KEYS.includes(k))), abuseipdbKey: brain.settings.abuseipdbKey ? "set" : "" },
         tops: tops(since), actions: brain.state.actions.slice(0, 40), vendors: brain.reporters.view(),
       });
     }
@@ -370,9 +385,19 @@ export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", 
     if (path === "/vendors" && m === "GET") return send(res, 200, { ...brain.reporters.view(), abuseipdb: !!brain.settings.abuseipdbKey, report: brain.settings.report });
     if (path === "/history" && m === "GET") return send(res, 200, { last: brain.state.history?.last || null, hosts: [...brain.sensors].map((x) => x.info?.host).filter(Boolean) });
     if (path === "/history/pull" && m === "POST") { brain.pullHistory(); return send(res, 200, { ok: true }); }
+    if (path === "/email" && m === "GET") return send(res, 200, emailView());
+    if (path === "/email/test" && m === "POST") {
+      if (!brain.mailer.status()) return send(res, 404, { error: "selfmail isn't running.", email: null });
+      try { const r = await brain.mailer.test(); return send(res, 200, { ...r, ...emailView() }); }
+      catch (e) { return send(res, e.status === 404 || e.status === 429 ? e.status : 502, { error: e.message, ...emailView() }); }
+    }
     if (path === "/settings") {
       if (m === "PUT") {
         const b = await readJson(req);
+        if ("mailTo" in b) {
+          b.mailTo = String(b.mailTo || "").trim();
+          if (b.mailTo && !validAddress(b.mailTo)) return send(res, 400, { error: "That isn't an email address." });
+        }
         for (const [k, def] of Object.entries(DEFAULT_SETTINGS)) {
           if (!(k in b)) continue;
           if (typeof def === "boolean") brain.state.settings[k] = !!b[k];
@@ -383,7 +408,7 @@ export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", 
         brain.dirty = true; brain.save(true);
         brain.broadcast({ t: "settings", settings: { auto: brain.settings.auto, drop: brain.settings.drop, lookups: brain.settings.lookups, scanFirst: brain.settings.scanFirst } });
       }
-      return send(res, 200, { ...brain.settings, abuseipdbKey: brain.settings.abuseipdbKey ? "•".repeat(8) + brain.settings.abuseipdbKey.slice(-4) : "" });
+      return send(res, 200, settingsView());
     }
     return send(res, 404, { error: "not found" });
   }
@@ -412,6 +437,7 @@ export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", 
       return send(res, 200, readFileSync(file), TYPES[extname(file)] || "application/octet-stream");
     } catch (e) {
       say("http:", e.message);
+      brain.fault("http", e.message);
       if (!res.headersSent) send(res, 500, { error: "internal error" }); else res.end();
     }
   });
@@ -422,6 +448,6 @@ export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", 
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const cfg = loadConfig({ create: true });
-  const app = startApp({ home: cfg.home, port: cfg.port, bind: cfg.bind, key: cfg.key, access: cfg.access, offline: process.env.BULWARK_OFFLINE === "1" });
+  const app = startApp({ home: cfg.home, port: cfg.port, bind: cfg.bind, key: cfg.key, access: cfg.access, dashboard: cfg.dashboard, offline: process.env.BULWARK_OFFLINE === "1" });
   for (const sig of ["SIGTERM", "SIGINT"]) process.on(sig, () => { app.close(); process.exit(0); });
 }

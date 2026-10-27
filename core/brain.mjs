@@ -14,14 +14,16 @@
 //                    the audit log) comes into the log and the profiles, and
 //                    anyone it shows hunting is banned by the same rules
 //   warnings         waves and bans go to the host's dashboard too (Aegis's
-//                    bell), unless Settings says not to
+//                    bell), unless Settings says not to; and by email when the
+//                    selfmail addon is there and you turned it on (mail.mjs):
+//                    waves, campaigns, strict mode, the guard gone, the app failing
 //
 // Never banned: private addresses, addresses you signed in from (30 days),
 // requests with your session, the allow list. This machine's own public
 // address is neither trusted nor banned: other people's traffic leaves through
 // it (Mysterium, proxyware).
 
-import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, copyFileSync } from "node:fs";
+import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, copyFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { isIP, isPrivate, normIp } from "./net.mjs";
 import { Feeds, FEEDS } from "./lists.mjs";
@@ -29,13 +31,14 @@ import { Asn } from "./asn.mjs";
 import { Logs, Series, Profiles } from "./store.mjs";
 import { Waves } from "./waves.mjs";
 import { Reporters } from "./report.mjs";
-import { inspect, categoryOf, SIGNATURES_VERSION } from "./payloads.mjs";
+import { Mailer, MAIL_DEFAULTS } from "./mail.mjs";
+import { inspect, categoryOf, signatureById, SIGNATURES_VERSION } from "./payloads.mjs";
 import { checkIp, useLists } from "./intel.mjs";
 import { paths } from "./config.mjs";
 
 const MIN = 60e3, HOUR = 60 * MIN, DAY = 24 * HOUR;
 export const CLEARED_FOR = 7 * DAY;     // a clean scan lets an address into public tunnels for this long (the guard keeps the same)
-export const DEFAULT_SETTINGS = { auto: true, drop: true, lookups: true, scanFirst: true, report: true, abuseipdbKey: "", ntfy: "", webhook: "", keepDays: 30, strict: true, hostNotices: true };
+export const DEFAULT_SETTINGS = { auto: true, drop: true, lookups: true, scanFirst: true, report: true, abuseipdbKey: "", ntfy: "", webhook: "", keepDays: 30, strict: true, hostNotices: true, ...MAIL_DEFAULTS };
 // what the engine found, on a log line (as the guard writes it)
 function label(e, sig) {
   e.sig = sig.id; e.sc = sig.score;
@@ -57,7 +60,9 @@ export function shortReason(r) {
 }
 
 export class Brain {
-  constructor({ home, log, fetchImpl, offline = false, remote }) {
+  // dashboard: Bulwark's dashboard URL for links in emails (the config's, else the host's);
+  // mesh: where to look for selfmail (tests); mailFetch: how to reach it (tests)
+  constructor({ home, log, fetchImpl, offline = false, remote, dashboard = null, mesh, mailFetch, version = "" }) {
     this.home = home; this.P = paths(home);
     for (const d of [this.P.feeds, this.P.asn, this.P.logs, this.P.state, this.P.run]) mkdirSync(d, { recursive: true });
     this.log = log || console.log;
@@ -85,6 +90,10 @@ export class Brain {
     this.profiles = new Profiles({ file: join(this.P.state, "profiles.json") });
     this.waves = new Waves({ file: join(this.P.state, "waves.json"), onAlert: (a, ch) => this.alerted(a, ch) });
     this.reporters = new Reporters({ file: join(this.P.state, "reports.json"), log: this.log, settings: () => this.state.settings, fetchImpl: this.fetch });
+    this.dashboard = dashboard;
+    this.mailer = new Mailer({ file: join(this.P.state, "mail.json"), settings: () => this.state.settings, log: this.log, dir: mesh, fetchImpl: mailFetch, version,
+                               context: (kind, items) => this.mailContext(kind, items) });
+    this.health = { hadGuard: false, lostAt: 0, downNoted: false, faults: [], faultNotedAt: 0 };
     this.remote = remote || ((ip, { probe }) => checkIp(ip, { light: true, probe, deadline: 0 }));
     this.remoteInjected = !!remote;
     useLists((ip) => this.feeds.lookup(ip), (ip) => (this.feeds.lists.has("tor") ? this.feeds.lookup(ip).some((l) => l.id === "tor") : null), (ip) => this.asn.lookup(ip));
@@ -114,14 +123,24 @@ export class Brain {
     if ((this.state.sigVersion || 1) < SIGNATURES_VERSION) once(() => this.rescan(), 15000);
     t(() => this.save(), 30e3);
     t(() => this.tick(), 30e3);
-    t(() => { this.profiles.save(); this.series.save(); this.waves.save(); this.reporters.save(); }, 2 * MIN);
+    t(() => { this.profiles.save(); this.series.save(); this.waves.save(); this.reporters.save(); this.mailer.save(); }, 2 * MIN);
     t(() => this.logs.prune(), 10 * MIN);
+    // a marker while running: still there at start means the last run ended without stop() (killed, crashed)
+    this.marker = join(this.P.run, "app.running");
+    if (existsSync(this.marker)) {
+      let was = null; try { was = JSON.parse(readFileSync(this.marker, "utf8")); } catch { /* unreadable */ }
+      this.log("the last run didn't stop cleanly");
+      this.mailer.event({ type: "critical", sev: "critical", key: "crash", title: "Bulwark restarted after stopping unexpectedly",
+        detail: `The app${was?.at ? `, running since ${new Date(was.at).toLocaleString()},` : ""} ended without shutting down (a crash, killed for memory, or the machine went down) and has started again. The guard kept enforcing meanwhile. Its journal says why: journalctl --user -u bulwark.` });
+    }
+    try { writeFileSync(this.marker, JSON.stringify({ pid: process.pid, at: Date.now() })); } catch { /* fine */ }
     return this;
   }
   stop() {
     for (const x of this.timers) { clearInterval(x); clearTimeout(x); }
     clearTimeout(this.banNoteTimer);
-    this.logs.flush(); this.save(true); this.profiles.save(); this.series.save(); this.waves.save(); this.reporters.save();
+    this.logs.flush(); this.save(true); this.profiles.save(); this.series.save(); this.waves.save(); this.reporters.save(); this.mailer.stop();
+    if (this.marker) try { unlinkSync(this.marker); } catch { /* gone */ }
   }
   save(force) {
     if (!this.dirty && !force) return;
@@ -173,16 +192,18 @@ export class Brain {
     switch (m.t) {
       case "hello":
         s.info = { host: m.host, hostVersion: m.hostVersion, since: Date.now(), stats: m.stats };
+        if (typeof m.dashboard === "string" && /^https?:\/\/[^\s"'<>]+$/.test(m.dashboard) && m.dashboard.length < 300 && this.state.dashboard !== m.dashboard) { this.state.dashboard = m.dashboard; this.dirty = true; }
+        this.guardUp();
         s.write(JSON.stringify({ t: "state", ...this.snapshot() }) + "\n");
         if (m.legacy && !this.state.imported) this.importLegacy(m.legacy);
         break;
       case "ev":
-        for (const e of m.list || []) { try { this.ingest(e); } catch (err) { this.log("ingest:", err.message); } }
+        for (const e of m.list || []) { try { this.ingest(e); } catch (err) { this.log("ingest:", err.message); this.fault("ingest", err.message); } }
         if (m.dropped) this.log(`a guard dropped ${m.dropped} log lines while the app was away`);
         break;
       case "ban": this.recordBan(m.ip, m.b, m.info || {}); break;
       case "trust": this.trust(m.ip, false); break;
-      case "history": try { this.importHistory(m.data || {}, m.host); } catch (err) { this.log("history:", err.message); } break;
+      case "history": try { this.importHistory(m.data || {}, m.host); } catch (err) { this.log("history:", err.message); this.fault("history", err.message); } break;
       case "devices": this.useDevices(m); break;
       case "scan": this.scanNow(m.ip); break;
     }
@@ -501,16 +522,22 @@ export class Brain {
     this.waves.tick(this.series.lastMinutes(90));
     const want = this.settings.strict && this.waves.critical() ? Date.now() + 30 * MIN : 0;
     if (want && want - this.strictUntil > 5 * MIN || (!want && this.strictUntil > Date.now() && !this.waves.critical())) {
+      const was = this.strictUntil > Date.now();
       this.strictUntil = want;
       this.broadcast({ t: "strict", until: want });
       if (want) this.log("a critical wave: strict mode (a first payload bans)");
+      if (want && !was) this.mailer.event({ type: "strict", sev: "critical", key: "strict", title: "Strict mode is on",
+        detail: "A critical wave is under way: while it lasts (30 minutes at least) an address's first payload bans it." });
     }
+    this.checkGuard();
+    this.mailer.tick();
   }
   alerted(a, change) {
     this.log(`wave ${change}: [${a.sev}] ${a.title}`);
     for (const fn of this.alertSubs || []) { try { fn(a, change); } catch { /* closed */ } }
     this.reporters.notify(a, change).catch(() => {});
     if (change !== "closed" && (a.sev === "warn" || a.sev === "critical")) {
+      this.mailer.event({ type: a.kind === "campaign" ? "campaign" : "wave", sev: a.sev, key: `wave:${a.key}`, alertKey: a.key, title: a.title, detail: a.detail || "" });
       this.hostNotice({ level: a.sev, key: `wave:${a.key}`, link: "/__gate/bulwark/#/waves", title: `${a.sev === "critical" ? "Attack wave" : "Wave"}: ${a.title}`, body: a.detail || "",
         items: (a.members || []).slice(0, 40).map((ip) => this.noticeItem(ip, this.state.bans[ip] ? null : "in this wave")) });
     }
@@ -518,6 +545,94 @@ export class Brain {
     if (a.kind === "campaign" && a.sev !== "info") for (const ip of a.members) if (this.state.bans[ip]) this.reporters.enqueue({ ip, ...this.state.bans[ip], source: "campaign", reason: `${this.state.bans[ip].reason}; part of a campaign of ${a.members.length} addresses` });
   }
   onAlerts(fn) { (this.alertSubs ||= new Set()).add(fn); return () => this.alertSubs.delete(fn); }
+
+  // ------------------------------------------------------------ health (critical emails)
+  // the guard: once one has connected, none for 5 minutes is "the guard is gone"
+  // (a host restarting for an update is back well before that)
+  guardUp() {
+    const h = this.health;
+    if (h.downNoted) this.mailer.event({ type: "critical", sev: "info", key: "guard", title: "The guard is back", detail: `A guard connected again after ${Math.max(1, Math.round((Date.now() - h.lostAt) / MIN))} minutes away.` });
+    h.hadGuard = true; h.lostAt = 0; h.downNoted = false;
+  }
+  guardGone() { if (!this.sensors.size && this.health.hadGuard && !this.health.lostAt) this.health.lostAt = Date.now(); }
+  checkGuard(now = Date.now()) {
+    const h = this.health;
+    if (this.sensors.size || !h.hadGuard || !h.lostAt || h.downNoted || now - h.lostAt < 5 * MIN) return;
+    h.downNoted = true;
+    this.log("no guard connected for 5 minutes");
+    this.mailer.event({ type: "critical", sev: "critical", key: "guard", title: "The guard is disconnected",
+      detail: `No host has been connected to Bulwark since ${new Date(h.lostAt).toLocaleTimeString()}: the gate stopped, or Bulwark's guard was unloaded from it. Until one is back, nothing is logged or watched for waves here.` });
+  }
+  // errors: 20 within 10 minutes is an app in trouble (an email at most once an hour)
+  fault(where, msg, now = Date.now()) {
+    const h = this.health;
+    h.faults.push(now);
+    while (h.faults.length && h.faults[0] < now - 10 * MIN) h.faults.shift();
+    if (h.faults.length > 200) h.faults.splice(0, h.faults.length - 200);
+    if (h.faults.length < 20 || now - h.faultNotedAt < HOUR) return;
+    h.faultNotedAt = now;
+    this.mailer.event({ type: "critical", sev: "critical", key: "faults", title: "Bulwark is failing",
+      detail: `${h.faults.length} errors in the last 10 minutes; the latest (${where}): ${String(msg || "").slice(0, 200)}.` });
+  }
+
+  // ------------------------------------------------------------ what an email says (mail.mjs, mailview.mjs)
+  dashboardUrl() {
+    const ok = (u) => (typeof u === "string" && /^https?:\/\/[^\s"'<>]+$/.test(u) ? u : null);
+    return ok(this.dashboard) || ok(this.state.dashboard) || null;
+  }
+  stranger(p) { return !(p.auth || isPrivate(p.ip) || this.own.has(p.ip) || this.isTrusted(p.ip) || this.state.allow[p.ip]); }
+  // addresses -> the busiest networks: [{name, asn, n, banned}]
+  netsOf(ps, max = 5) {
+    const m = new Map();
+    for (const p of ps) {
+      const k = p.asn || 0, x = m.get(k) || { name: p.org || (p.asn ? `AS${p.asn}` : "unknown network"), asn: p.asn || null, n: 0, banned: 0 };
+      x.n++; x.banned += this.state.bans[p.ip] ? 1 : 0; m.set(k, x);
+    }
+    return [...m.values()].sort((a, b) => b.n - a.n || b.banned - a.banned).slice(0, max);
+  }
+  // pattern counts -> [{name, n}]
+  patternsOf(counts, max = 5) {
+    return Object.entries(counts).filter(([id]) => signatureById(id)?.sev !== "info").sort((a, b) => b[1] - a[1]).slice(0, max)
+      .map(([id, k]) => ({ name: signatureById(id)?.name || id, n: k }));
+  }
+  mailContext(kind, items = []) {
+    const now = Date.now(), base = this.dashboardUrl();
+    const hosts = [...this.sensors].map((x) => x.info?.host).filter(Boolean);
+    if (kind === "test" || kind === "system") return { link: base, sensors: this.sensors.size, hosts };
+    if (kind === "digest") {
+      const since = now - DAY, t = this.series.total(DAY), sig = {};
+      for (const p of this.series.range(DAY, 48).points) for (const [k, v] of Object.entries(p.sig || {})) sig[k] = (sig[k] || 0) + v;
+      const ps = this.profiles.recent(since, 20000).filter((p) => this.stranger(p) && Object.keys(p.sigs).length);
+      return { link: base, totals: { req: t.req, attacks: t.payload + t.probe, newIps: t.newIp, bans: this.bansList().filter((b) => (b.at || 0) >= since).length },
+               waves: this.waves.list(200).filter((a) => a.first >= since && a.sev !== "info").map((a) => ({ title: a.title, sev: a.sev, first: a.first, members: a.members?.length || 0 })),
+               nets: this.netsOf(ps), patterns: this.patternsOf(sig) };
+    }
+    // a wave: the numbers now against the hour before, who is in it, what they try
+    const mins = this.series.lastMinutes(76), done = mins.slice(0, -1), last5 = done.slice(-5), before = done.slice(0, -15);
+    const att = (b) => (b.payload || 0) + (b.probe || 0);
+    const peak = (f) => Math.max(0, ...last5.map(f)), avg = (f) => (before.length ? before.reduce((a, b) => a + f(b), 0) / before.length : 0);
+    const alerts = {}, members = new Set();
+    for (const it of items) {
+      const a = it.alertKey && this.waves.alerts.get(it.alertKey);
+      if (!a) continue;
+      alerts[it.alertKey] = { title: a.title, detail: a.detail, sev: a.sev, forecast: a.forecast || null, members: a.members?.length || 0, open: a.open };
+      for (const ip of a.members || []) members.add(ip);
+    }
+    // a surge names no addresses: then the strangers of the last 15 minutes that tried something
+    const ps = members.size ? [...members].map((ip) => this.profiles.get(ip) || { ip, sigs: {} })
+                            : this.profiles.recent(now - 15 * MIN, 5000).filter((p) => this.stranger(p) && Object.keys(p.sigs).length);
+    const sig = {};
+    for (const b of done.slice(-15)) for (const [k, v] of Object.entries(b.sig || {})) sig[k] = (sig[k] || 0) + v;
+    return {
+      link: base ? `${base}#/waves` : null,
+      rpm: peak((b) => b.req || 0), normalRpm: Math.round(avg((b) => b.req || 0) * 10) / 10,
+      attacks: peak(att), normalAttacks: Math.round(avg(att) * 10) / 10,
+      members: members.size, banned: members.size ? [...members].filter((ip) => this.state.bans[ip]).length : this.bansList().filter((b) => (b.at || 0) >= now - HOUR).length,
+      bansHour: this.bansList().filter((b) => (b.at || 0) >= now - HOUR).length,
+      strict: this.strictUntil > now ? this.strictUntil : 0,
+      nets: this.netsOf(ps), patterns: this.patternsOf(sig), alerts,
+    };
+  }
 
   // ------------------------------------------------------------ this machine
   async refreshOwn() {

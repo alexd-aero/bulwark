@@ -42,6 +42,10 @@ const MAX_QUEUE = 5000;
 const MAX_BACKLOG = 4e6;        // bytes waiting on the socket: past this the app is not keeping up
 
 function log(...a) { ctx?.log?.(...a); }
+// where the app's dashboard is (Aegis mounts it at /__gate/bulwark/ on its own host): for links in emails
+function dashboardUrl() {
+  try { const d = ctx?.domain?.(); return d?.mainHost && /^[a-z0-9.-]+$/i.test(d.mainHost) ? `https://${d.mainHost}/__gate/bulwark/` : null; } catch { return null; }
+}
 // Never let a slow app grow this process (the gate itself): what can't be
 // written soon is dropped and counted, the guard keeps deciding on its own.
 const backedUp = () => !!sock && sock.writableLength > MAX_BACKLOG;
@@ -63,7 +67,7 @@ function connectApp() {
   s.on("connect", () => {
     sock = s; connectedAt = Date.now();
     send({ t: "hello", host: "aegis-burrow", hostVersion: ctx?.hostVersion || null, legacy: ctx?.legacyShield || null,
-           stats: guardObj.stats });
+           dashboard: dashboardUrl(), stats: guardObj.stats });
     for (const m of pending.splice(0)) send(m);
     flush();
     sendHistory();
