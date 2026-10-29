@@ -108,7 +108,7 @@ export class Brain {
 
   start() {
     this.feeds.loadAll();
-    this.asn.load().then(() => this.backfillAsn()).catch(() => {});
+    this.asn.load().then(() => { this.backfillAsn(); this.liftListedOnly(); }).catch(() => {});
     const t = (fn, ms) => { const x = setInterval(fn, ms); x.unref?.(); this.timers.push(x); };
     const once = (fn, ms) => { const x = setTimeout(fn, ms); x.unref?.(); this.timers.push(x); };
     if (!this.offline) {
@@ -376,6 +376,22 @@ export class Brain {
     if (n) this.log(`networks filled in for ${n} addresses`);
   }
 
+  // Before 1.8.2 a listing alone (DroneBL, GreyNoise) banned any address. One
+  // that isn't a datacenter's and tried nothing here is let go: a shared home
+  // or mobile address, banned for someone else's phone.
+  liftListedOnly() {
+    if (!this.asn.t4) return;
+    let n = 0;
+    for (const [ip, b] of Object.entries(this.state.bans)) {
+      if (b.source !== "lookup" || b.sigs?.length || b.lines?.length) continue;
+      if (this.asn.lookup(ip)?.hosting) continue;
+      delete this.state.bans[ip]; this.verdicts.delete(ip); n++;
+      this.action(ip, "unbanned", "listed elsewhere only, on a home or mobile network (1.8.2)");
+      this.broadcast({ t: "unban", ip });
+    }
+    if (n) { this.dirty = true; this.log(`let ${n} addresses go: banned for a listing only, on home or mobile networks`); this.writeSnapshot(); }
+  }
+
   // ------------------------------------------------------------ lookups (behind, never in the way)
   due(ip, probe) {
     if (!this.settings.lookups || this.offline && !this.remoteInjected) return false;
@@ -406,7 +422,7 @@ export class Brain {
     if (!isIP(ip) || isPrivate(ip) || this.own.has(ip)) return;
     const v = this.verdicts.get(ip);
     if (v && Date.now() - v.at < CLEARED_FOR) {                  // already known: say it again
-      if (!v.bad) this.clear(ip); else if (!this.state.bans[ip]) this.broadcast({ t: "verdict", ip, v: { bad: v.bad, benign: v.benign, level: v.level, why: v.why } });
+      if (this.letIn(ip, v.bad)) this.clear(ip); else if (!this.state.bans[ip]) this.broadcast({ t: "verdict", ip, v: { bad: v.bad, benign: v.benign, level: v.level, why: v.why } });
       return;
     }
     if (this.offline && !this.remoteInjected) return;
@@ -417,12 +433,18 @@ export class Brain {
     this.queue.unshift({ ip, probe: false, first: true });
     this.pump();
   }
+  // Public tunnels let it in: nothing against it, or only a listing elsewhere on
+  // a shared home or mobile address that has done nothing here.
+  letIn(ip, bad) { return !bad || (!this.asn.lookup(ip)?.hosting && !this.profiles.get(ip)?.seq?.length); }
   clear(ip) {
     (this.state.cleared ||= {})[ip] = Date.now(); this.dirty = true;
     this.broadcast({ t: "cleared", ip, at: this.state.cleared[ip] });
   }
-  // Banned for a hard sign only (GreyNoise has seen it attack, DroneBL lists
-  // it); anything else bad bans together with a probe. Known services: innocent.
+  // A listing elsewhere (GreyNoise has seen it attack, DroneBL lists it) bans on
+  // its own only a datacenter address: nobody browses from one. A home or mobile
+  // address is shared (carrier NAT: one infected phone lists thousands of
+  // people), so it is banned only for what it does here: a probe plus a bad
+  // lookup, or a payload (the guard). Known services: innocent.
   judge(ip, r) {
     if (!r?.verdict) return;
     this.state.stats.checked++; this.dirty = true;
@@ -433,15 +455,16 @@ export class Brain {
     this.verdicts.set(ip, v);
     if (this.verdicts.size > 50000) this.verdicts.delete(this.verdicts.keys().next().value);
     if (bad || benign) this.broadcast({ t: "verdict", ip, v: { bad, benign, level, why: v.why } });
-    if (!bad) this.clear(ip);                     // nothing against it: public tunnels let it in
+    const p = this.profiles.get(ip);
+    const dc = !!this.asn.lookup(ip)?.hosting;
+    if (this.letIn(ip, bad)) this.clear(ip);
     if (!this.settings.auto || this.state.allow[ip] || this.state.bans[ip] || this.isTrusted(ip) || this.own.has(ip) || benign) return;
     const hard = [];
     if (src.greynoise?.result?.classification === "malicious") hard.push("GreyNoise has seen it attack");
     if (src.dnsbl?.result?.dronebl?.listed) hard.push(`DroneBL: ${src.dnsbl.result.dronebl.why.join(", ")}`);
     if (!r.sources && level === "malicious") hard.push(...r.verdict.why.slice(0, 2));
-    const p = this.profiles.get(ip);
-    if (hard.length) this.ban(ip, hard.join(", "), { source: "lookup", ttl: 7 * DAY });
-    else if (p?.seq?.length && (bad || level === "notice")) this.ban(ip, `probed (${p.paths.find((x) => x) || "?"}) and ${r.verdict.why.slice(0, 2).join(", ")}`, { source: "payload", ttl: 30 * DAY });
+    if (hard.length && dc) this.ban(ip, hard.join(", "), { source: "lookup", ttl: 7 * DAY });
+    else if (p?.seq?.length && (bad || hard.length || level === "notice")) this.ban(ip, `probed (${p.paths.find((x) => x) || "?"}) and ${r.verdict.why.slice(0, 2).join(", ")}`, { source: "payload", ttl: 30 * DAY });
   }
 
   // ------------------------------------------------------------ bans

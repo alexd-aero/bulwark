@@ -21,10 +21,14 @@ writeFileSync(join(legacy, "state.json"), JSON.stringify({ bans: { "35.236.186.1
                                                           allow: {}, trusted: { "93.184.216.34": Date.now() }, events: [{ t: Date.now() - 1000, ip: "35.236.186.124", act: "banned", why: "x" }] }));
 writeFileSync(join(legacy, "feeds", "cins.txt"), "45.148.10.120\n");
 
-const verdicts = { "203.0.113.66": { verdict: { level: "malicious", why: ["GreyNoise: malicious"] }, sources: { greynoise: { result: { classification: "malicious", seen: true } } } } };
+const gnBad = { verdict: { level: "malicious", why: ["GreyNoise: malicious"] }, sources: { greynoise: { result: { classification: "malicious", seen: true } } } };
+// 203.0.113.66: listed, on a home or mobile network; 198.51.100.200: listed, a datacenter's
+const verdicts = { "203.0.113.66": gnBad, "198.51.100.200": gnBad };
 const app = startApp({ home, port: 0, key: "k", offline: true, quiet: true,
   remote: async (ip) => verdicts[ip] || { verdict: { level: "clean", why: [] }, sources: {} } });
 after(() => { sock?.destroy(); app.close(); });
+const realAsn = app.brain.asn.lookup.bind(app.brain.asn);
+app.brain.asn.lookup = (ip) => (ip === "198.51.100.200" ? { asn: 64500, name: "EXAMPLE HOSTING", cc: "NL", hosting: true } : realAsn(ip));
 const base = () => `http://127.0.0.1:${app.server.address().port}`;
 const get = (p) => fetch(base() + p, { headers: { "x-bulwark-key": "k" } }).then((r) => r.json());
 const post = (p, b = {}) => fetch(base() + p, { method: "POST", headers: { "x-bulwark-key": "k", "Content-Type": "application/json" }, body: JSON.stringify(b) }).then((r) => r.json());
@@ -71,6 +75,7 @@ test("a wave: logged in full, banned, a campaign alert, the graph and the export
     list.push({ t: t0 + i * 10 + 5, ip, cc: "US", host: "27715.tunnel.example", m: "GET", path: "/.git/config", ua: "Go-http-client/1.1", dec: "ban", sig: "vcs", sc: 3, st: 403, b: 8, why: "sent 2 payloads" });
   }
   list.push({ t: t0 + 100, ip: "203.0.113.66", cc: "NL", host: "27715.tunnel.example", m: "GET", path: "/", ua: "Mozilla/5.0", dec: "pass", st: 200, b: 1900 });
+  list.push({ t: t0 + 110, ip: "198.51.100.200", cc: "NL", host: "27715.tunnel.example", m: "GET", path: "/", ua: "Mozilla/5.0", dec: "pass", st: 200, b: 1900 });
   tell({ t: "ev", list });
   for (const ip of cloud) tell({ t: "ban", ip, b: { reason: "sent 2 payloads (/.git/config, /.env)", until: null, source: "payload", at: Date.now() }, info: { host: "27715.tunnel.example", country: "US" } });
   await sleep(300);
@@ -80,12 +85,15 @@ test("a wave: logged in full, banned, a campaign alert, the graph and the export
   assert.equal(logs[0].path, "/.git/config", "newest first");
   assert.equal((await get("/api/logs?dec=bad&limit=100")).logs.length, 14);
   assert.equal((await get("/api/logs?q=git%2Fconfig")).logs.length, 7);
-  // bans: the guard's, and the lookup's (GreyNoise malicious)
+  // bans: the guard's. A GreyNoise listing alone, on an address that isn't a
+  // datacenter's and only opened a page, is no ban (a shared home or mobile address)
   const bl = (await get("/api/blocklist")).bans.map((b) => b.ip);
   for (const ip of cloud) assert.ok(bl.includes(ip), ip);
-  assert.ok(bl.includes("203.0.113.66"), "banned by its lookup");
-  assert.ok(got.some((m) => m.t === "ban" && m.ip === "203.0.113.66"), "and the guard was told");
-  assert.ok(got.some((m) => m.t === "kick" && m.ip === "203.0.113.66"));
+  await sleep(200);
+  assert.ok(!bl.includes("203.0.113.66"), "not banned for its listing alone");
+  assert.equal(got.some((m) => m.t === "ban" && m.ip === "203.0.113.66"), false);
+  assert.ok(await until(async () => (await get("/api/blocklist")).bans.some((b) => b.ip === "198.51.100.200")), "a datacenter's listed address is");
+  assert.ok(got.some((m) => m.t === "kick" && m.ip === "198.51.100.200"));
   const ban = app.brain.state.bans["136.85.34.52"];
   assert.deepEqual(ban.lines, ["GET /.env", "GET /.git/config"], "evidence kept for reports");
   // the wave
@@ -104,8 +112,8 @@ test("a wave: logged in full, banned, a campaign alert, the graph and the export
   // charts and graph
   const s = await get("/api/series?span=1h&points=60");
   const sum = s.points.reduce((a, p) => a + p.req, 0);
-  assert.equal(sum, 15);
-  assert.equal(s.points.reduce((a, p) => a + p.newIp, 0), 8);
+  assert.equal(sum, 16);
+  assert.equal(s.points.reduce((a, p) => a + p.newIp, 0), 9);
   // the Patterns page: networks -> patterns, counted in addresses, the campaign, who's behind each
   const g = await get("/api/patterns?span=1h");
   const env = g.sigs.find((x) => x.sig === "env-file"), vcs = g.sigs.find((x) => x.sig === "vcs");
@@ -133,10 +141,10 @@ test("a wave: logged in full, banned, a campaign alert, the graph and the export
   assert.equal(g.totals.attacked + g.totals.known, g.totals.ips);
   assert.ok(!g.sigs.some((x) => x.id === "sig:none"), "and it isn't a pattern");
   const kw = await get("/api/patterns/who?span=1h&id=sig:none");
-  assert.ok(kw.ips.some((x) => x.ip === "203.0.113.66" && x.n >= 1));
+  assert.ok(kw.ips.some((x) => x.ip === "198.51.100.200" && x.n >= 1));
   // overview
   const o = await get("/api/overview?span=1h");
-  assert.equal(o.totals.req, 15);
+  assert.equal(o.totals.req, 16);
   assert.ok(o.alerts.length >= 2);
   assert.equal(o.tops.sigs[0].n, 7);
   // export
@@ -205,8 +213,9 @@ test("a public tunnel asks for a scan: clean ones are cleared (and stay so), a k
   assert.ok(await until(() => got.some((m) => m.t === "cleared" && m.ip === "192.0.2.60")), "cleared");
   assert.ok(app.brain.state.cleared["192.0.2.60"]);
   tell({ t: "scan", ip: "203.0.113.66" });
-  assert.ok(await until(() => app.brain.state.bans["203.0.113.66"]), "GreyNoise has seen it attack: banned");
-  assert.equal(got.some((m) => m.t === "cleared" && m.ip === "203.0.113.66"), false);
+  // listed by GreyNoise, but not a datacenter's address and it did nothing here: let in, not banned
+  assert.ok(await until(() => got.some((m) => m.t === "cleared" && m.ip === "203.0.113.66")), "a listing alone: let in");
+  assert.equal(app.brain.state.bans["203.0.113.66"], undefined);
   got.length = 0;
   tell({ t: "scan", ip: "192.0.2.60" });
   assert.ok(await until(() => got.some((m) => m.t === "cleared" && m.ip === "192.0.2.60")), "asked again: told again, without a new lookup");

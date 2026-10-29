@@ -2,7 +2,7 @@
   "spec": 1,
   "id": "bulwark",
   "name": "Bulwark",
-  "version": "1.8.1",
+  "version": "1.8.2",
   "description": "A shield for everything you publish. Every request is decoded and judged in microseconds by an attack engine with 21 categories and 44 known CVE exploits, scored CRS-style with per-address behaviour, and checked against 250k+ blocklisted addresses; attackers are banned on every tunnel at once. Its own dashboard shows every request in full, warns about waves, graphs the patterns, inspects any IP across a dozen free sources and reports attackers to the vendors that missed them. With the selfmail addon, it emails you about waves too.",
   "author": "Alexd Aero",
   "license": "MIT",
