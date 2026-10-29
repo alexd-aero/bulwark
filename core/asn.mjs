@@ -67,7 +67,9 @@ export class Asn {
       const metaOf = (cc, name) => {
         const k = cc + "\t" + name;
         let i = index.get(k);
-        if (i === undefined) { i = names.length; names.push({ cc: cc === "None" ? "" : cc, name, hosting: HOSTING.test(name) && !CONSUMER.test(name) }); index.set(k, i); }
+        // a copy, not a slice: a sliced string keeps the whole decompressed text it came from
+        // alive, and 85k names held ~40 MB of it (too much on a 1 GB machine)
+        if (i === undefined) { i = names.length; const own = Buffer.from(name).toString(); names.push({ cc: cc === "None" ? "" : Buffer.from(cc).toString(), name: own, hosting: HOSTING.test(own) && !CONSUMER.test(own) }); index.set(k, i); }
         return i;
       };
       const read = async (k, big) => {
@@ -88,7 +90,10 @@ export class Asn {
           else { t.start[t.n] = v4int(a); t.end[t.n] = v4int(b); }
           t.asn[t.n] = asn; t.meta[t.n] = metaOf(line.slice(i3 + 1, i4 < 0 ? undefined : i4), i4 < 0 ? "" : line.slice(i4 + 1)); t.n++;
         }
-        return t;
+        // grown by doubling: down to what's used
+        const fit = new Table(Math.max(1, t.n), big);
+        fit.start.set(t.start.subarray(0, t.n)); fit.end.set(t.end.subarray(0, t.n)); fit.asn.set(t.asn.subarray(0, t.n)); fit.meta.set(t.meta.subarray(0, t.n)); fit.n = t.n;
+        return fit;
       };
       const t4 = await read("v4", false), t6 = await read("v6", true);
       if (t4) { this.t4 = t4; this.t6 = t6; this.names = names; this.at = Date.now(); }

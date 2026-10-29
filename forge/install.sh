@@ -21,7 +21,7 @@ Description=Bulwark: the shield's app (dashboard, lookups, waves, reports)
 After=network-online.target
 
 [Service]
-ExecStart=$NODE --max-old-space-size=384 $APP/server.mjs
+ExecStart=$NODE $(node_flags) $APP/server.mjs
 Restart=always
 RestartSec=3
 Nice=5

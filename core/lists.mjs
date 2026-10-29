@@ -125,6 +125,16 @@ export class RangeSet {
 }
 
 // A list's text as [strength, entry, extra] (what parseFeed seals).
+// What's in a feed, for spotting the new entries in a fresh copy: a 30-bit FNV-1a
+// hash (a small integer V8 keeps unboxed), not the "strength entry" string itself.
+// The strings cost ~34 MB for ~250k entries: most of Bulwark's heap, too much on a
+// 1 GB machine. A collision only means one new entry waits for the next full re-read.
+export function keyOf(strength, entry) {
+  let h = 0x811c9dc5;
+  const s = strength + " " + entry;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return h >>> 2;
+}
 export function feedEntries(feed, text) {
   const out = [];
   if (feed.kind === "elsnet") {
@@ -192,7 +202,7 @@ export class Feeds {
     this.fetch = fetchImpl || ((...a) => fetch(...a));
     this.onChange = onChange || null;
     this.lists = new Map();
-    this.keys = new Map();         // feed id -> Set of "strength entry" (what's in it, for deltas)
+    this.keys = new Map();         // feed id -> Set of keyOf(strength, entry) (what's in it, for deltas)
     this.onAdd = null;             // (feedId, [[strength, entry, extra]...]) new addresses, as they arrive
     this.meta = {};
     try { this.meta = JSON.parse(readFileSync(join(dir, "meta.json"), "utf8")); } catch { /* first run */ }
@@ -207,7 +217,7 @@ export class Feeds {
       const count = Object.values(sets).reduce((a, s) => a + s.count, 0);
       if (!count) throw new Error("no addresses in it");
       this.lists.set(f.id, sets);
-      this.keys.set(f.id, new Set(feedEntries(f, text).map(([st, e]) => st + " " + e)));
+      this.keys.set(f.id, new Set(feedEntries(f, text).map(([st, e]) => keyOf(st, e))));
       m.count = count; m.loaded = Date.now(); m.rebuilt = Date.now();
       return true;
     } catch (e) { m.error = e.message; return false; }
@@ -256,7 +266,7 @@ export class Feeds {
           const text = await r.text();
           const have = this.keys.get(f.id) || new Set(), sets = this.lists.get(f.id), fresh = [];
           for (const [st, e, extra] of feedEntries(f, text)) {
-            const k = st + " " + e;
+            const k = keyOf(st, e);
             if (have.has(k)) continue;
             have.add(k);
             const set = (sets[st] ||= RangeSet.empty());

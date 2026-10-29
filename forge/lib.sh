@@ -8,6 +8,14 @@ find_node() {
 }
 NODE="$(find_node || true)"
 cfg() { "$NODE" --input-type=module -e "import { loadConfig } from '$APP/core/config.mjs'; const c = loadConfig({ create: true }); console.log(c['$1'] ?? '');"; }
+# Node's own settings for the app. On a small machine (under 2.5 GB, a Pi 3 has 1) the
+# defaults let the heap and its young generation grow to ~330 MB resident for ~35 MB of
+# live data, and the machine swaps; these keep it near 120 MB.
+node_flags() {
+  local kb; kb=$(awk '/^MemTotal:/{print $2}' /proc/meminfo 2>/dev/null || echo 0)
+  if [ "${kb:-0}" -gt 0 ] && [ "$kb" -lt 2621440 ]; then echo "--max-old-space-size=192 --max-semi-space-size=4 --optimize-for-size"
+  else echo "--max-old-space-size=384 --max-semi-space-size=8"; fi
+}
 # from inside a host's service the user's systemd session isn't in the environment: point at it
 if [ -z "${XDG_RUNTIME_DIR:-}" ] && [ -d "/run/user/$(id -u)" ]; then export XDG_RUNTIME_DIR="/run/user/$(id -u)"; fi
 if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ] && [ -S "${XDG_RUNTIME_DIR:-/nonexistent}/bus" ]; then export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"; fi
