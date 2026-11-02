@@ -31,6 +31,7 @@ import { lookupIn, RangeSet } from "../core/lists.mjs";
 import { inspect, verdictOf, signatureById } from "../core/payloads.mjs";
 
 const HOUR = 3600e3, DAY = 24 * HOUR;
+const OPEN_BAN_FOR = HOUR;
 export const CLEARED_FOR = 7 * DAY;          // a clean scan lets an address into public tunnels for this long
 const SCAN_ASK_EVERY = 10e3;
 export const BAN_AT = 10;                    // an address's points that ban it (two payloads)
@@ -99,6 +100,12 @@ export class Guard {
     }
   }
   useLists(lists) { this.lists = lists; }
+  // A tunnel with "Check visitors' addresses" off (info.ipChecks === false) judges the
+  // request, never the address: what the address is known for elsewhere doesn't
+  // stop anyone. A ban you set does, and so does one this address earned by what
+  // it sent, for an hour: long enough to stop a scanner, short enough that one
+  // person behind a shared school or office address doesn't lock the rest out.
+  forgiven(ban, now) { return ban.source !== "manual" && !(ban.source === "payload" && now - (ban.at || 0) < OPEN_BAN_FOR); }
   isTrusted(ip) { const t = this.trusted.get(ip); return !!t && Date.now() - t < 30 * DAY && !this.own.has(ip); }
   // a sign-in (or a request with a valid session): yours from now on, and any ban on it is lifted
   trust(ip) {
@@ -122,7 +129,7 @@ export class Guard {
     return out;
   }
   decide(ip, info) {
-    const bw = (info._bw = { dec: "pass" });
+    const bw = (info._bw = { dec: "pass" }), open = info.ipChecks === false;
     if (!isIP(ip) || isPrivate(ip)) { bw.local = true; return null; }
     if (this.allow.has(ip)) { bw.allowed = true; return null; }
     let sig = inspect(info);
@@ -148,7 +155,7 @@ export class Guard {
     }
     const now = this.now();
     const ban = this.bans.get(ip);
-    if (ban && (!ban.until || ban.until > now)) {
+    if (ban && (!ban.until || ban.until > now) && !(open && this.forgiven(ban, now))) {
       mark();
       if (ban.source !== "manual" && trusted()) return null;        // trust() lifted it
       this.stats.blocked++;
@@ -159,8 +166,10 @@ export class Guard {
     const extra = this.behave(ip, info, bw, now);
     if (extra) sig = verdictOf([...(sig.list || []), ...extra]);
     mark();
-    const lists = lookupIn(this.lists, ip);
+    const lists = open ? [] : lookupIn(this.lists, ip);
     if (lists.length) bw.lists = lists.map((l) => l.id);
+    // no address check here, so a scanner's name turns it away instead of only labelling it
+    if (open && this.settings.drop && sig.list?.some((h) => h.id === "scanner-ua") && !trusted()) return this.drop(bw, "a scanner");
     if (!this.settings.auto) {
       if (sig.score === 3 && this.settings.drop && !trusted()) return this.drop(bw, "a payload");
       return this.scanFirst(ip, info, bw, trusted);
@@ -169,7 +178,7 @@ export class Guard {
     if (strong.length && !trusted()) return this.ban(ip, `on ${strong.map((l) => l.name).join(", ")}`, "list", 7 * DAY, info, bw);
     if (!sig.id || sig.label) {                                       // a scanner's name only labels the request: it never adds up to a ban
       const due = this.scores.get(ip);                                // probes the app said weren't here may have tipped it over since
-      if (due?.due && now - due.last < DAY && !this.verdicts.get(ip)?.benign && !trusted()) { due.due = false; return this.ban(ip, `scored ${due.score} (${due.paths.slice(0, 2).join(", ")})`, "payload", 30 * DAY, info, bw); }
+      if (due?.due && now - due.last < DAY && (open || !this.verdicts.get(ip)?.benign) && !trusted()) { due.due = false; return this.ban(ip, `scored ${due.score} (${due.paths.slice(0, 2).join(", ")})`, "payload", 30 * DAY, info, bw); }
       return this.scanFirst(ip, info, bw, trusted);
     }
     if (trusted()) return null;
@@ -182,7 +191,7 @@ export class Guard {
     sc.paths.unshift(String(info.path).slice(0, 120)); sc.paths.length = Math.min(sc.paths.length, 8);
     this.scores.set(ip, sc);
     if (this.scores.size > MAX_TRACKED) this.scores.delete(this.scores.keys().next().value);
-    const v = this.verdicts.get(ip);
+    const v = open ? null : this.verdicts.get(ip);
     if (v?.benign && sc.payloads >= 2) {
       return this.ban(ip, `hunted secrets (${sc.paths.slice(0, 2).join(", ")}); a known scanner (${(v.why || []).slice(0, 1).join("") || "GreyNoise: benign"}), but not one you want indexing your leaks`, "payload", 30 * DAY, info, bw);
     }
@@ -255,7 +264,7 @@ export class Guard {
   // nothing against. Anyone else gets a "checking" page (403, it reloads by
   // itself) while the app scans them first in line; one the scan flagged is blocked.
   scanFirst(ip, info, bw, trusted) {
-    if (info.access !== "public" || !this.settings.scanFirst || trusted() || this.isCleared(ip)) return null;
+    if (info.ipChecks === false || info.access !== "public" || !this.settings.scanFirst || trusted() || this.isCleared(ip)) return null;
     const v = this.verdicts.get(ip);
     if (v?.benign) return null;
     this.stats.checks++;
@@ -273,12 +282,15 @@ export class Guard {
     return { status: 403, body: "Checking your address first. Try again in a few seconds.", why: "not scanned yet", page: "checking", retry: 2 };
   }
   // who may pass, for a relay in front (Aegis mirrors it to your VPS): addresses only
-  edge() {
+  // openTunnels: some tunnel doesn't check addresses. The relay turns banned addresses
+  // away for every name it carries, so it only gets the bans that tunnel keeps too;
+  // this machine still applies the rest to the other tunnels.
+  edge({ openTunnels = false } = {}) {
     const now = Date.now();
     const fresh = (m, ttl) => [...m].filter(([ip, t]) => now - t < ttl && !this.own.has(ip)).map(([ip]) => ip);
     return { version: this.edgeVersion, on: !!this.settings.scanFirst,
              cleared: [...new Set([...fresh(this.cleared, CLEARED_FOR), ...fresh(this.trusted, 30 * DAY), ...this.allow])],
-             banned: [...this.bans].filter(([ip, b]) => (!b.until || b.until > now) && !this.allow.has(ip) && !this.isTrusted(ip)).map(([ip]) => ip) };
+             banned: [...this.bans].filter(([ip, b]) => (!b.until || b.until > now) && !this.allow.has(ip) && !this.isTrusted(ip) && !(openTunnels && this.forgiven(b, now))).map(([ip]) => ip) };
   }
   drop(bw, why) {
     this.stats.dropped++;

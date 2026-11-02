@@ -2,7 +2,7 @@
   "spec": 1,
   "id": "bulwark",
   "name": "Bulwark",
-  "version": "1.8.2",
+  "version": "1.9.0",
   "description": "A shield for everything you publish. Every request is decoded and judged in microseconds by an attack engine with 21 categories and 44 known CVE exploits, scored CRS-style with per-address behaviour, and checked against 250k+ blocklisted addresses; attackers are banned on every tunnel at once. Its own dashboard shows every request in full, warns about waves, graphs the patterns, inspects any IP across a dozen free sources and reports attackers to the vendors that missed them. With the selfmail addon, it emails you about waves too.",
   "author": "Alexd Aero",
   "license": "MIT",
@@ -12,15 +12,15 @@
     "theme": "red",
     "icon": "shield",
     "style": "glow",
-    "badge": "EMAIL ALERTS",
+    "badge": "OPEN TUNNELS",
     "title": "{name} {version}",
-    "tagline": "With the selfmail addon installed, Bulwark can email you when a wave hits, and when the guard goes down.",
+    "tagline": "A public tunnel can stop checking visitors' addresses, and still stop attacks and scanners by what they send.",
     "highlights": [
-      "Email alerts through selfmail: shown only when it's installed, off until you turn them on",
-      "Wave emails: requests a minute against normal, top networks and patterns, how many banned",
-      "One email at once, then at most one every 15 minutes with everything in between summed up",
-      "Critical emails when the guard disconnects, or the app crashes or keeps failing",
-      "Choose the recipient and the events, add a daily digest, send a test from Settings"
+      "Turn off Check visitors' addresses on one tunnel: no lists, no checking page, no flagged addresses",
+      "Shared school or office addresses get in, even if someone else got them listed",
+      "Payloads and attack tools are still dropped, and known scanners are turned away on those tunnels",
+      "Your own bans still hold there, and bans earned by what an address sent hold for an hour",
+      "Every other tunnel works exactly as before"
     ],
     "button": "Update to {version}",
     "notes": "https://github.com/alexd-aero/bulwark/commits/main"

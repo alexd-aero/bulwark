@@ -200,3 +200,42 @@ test("fast: 100k decisions well under a second", () => {
   assert.ok(ms < 1500, `took ${Math.round(ms)} ms`);
   assert.ok(g.stats.us / g.stats.requests < 15, `${(g.stats.us / g.stats.requests).toFixed(1)} µs a request`);
 });
+
+test("a tunnel that doesn't check addresses: listed visitors pass, attacks and scanners don't", () => {
+  const { g } = guard();
+  g.settings.scanFirst = true;
+  const open = (x = {}) => ({ method: "GET", path: "/demo/", host: "site.example", access: "public", ipChecks: false, ua: "Mozilla/5.0 Chrome/144", ...x });
+  // the same addresses elsewhere: held or blocked; here: straight in
+  assert.equal(g.gate("198.51.100.7", { ...open(), ipChecks: undefined })?.page, "checking");
+  assert.equal(g.gate("198.51.100.7", open()), null);
+  g.apply({ t: "verdict", ip: "198.51.100.8", v: { bad: true, why: ["flagged"] } });
+  assert.equal(g.gate("198.51.100.8", open()), null);
+  const old = Date.now() - 2 * 3600e3;
+  for (const [ip, source] of [["198.51.100.9", "list"], ["198.51.100.10", "lookup"]]) g.apply({ t: "ban", ip, b: { source, reason: "listed", until: null, at: Date.now() } });
+  g.apply({ t: "ban", ip: "198.51.100.11", b: { source: "payload", reason: "an old one", until: null, at: old } });
+  for (const ip of ["198.51.100.9", "198.51.100.10", "198.51.100.11"]) {
+    assert.equal(g.gate(ip, open()), null, ip);
+    assert.equal(g.gate(ip, { ...open(), ipChecks: true })?.status, 403, ip);          // other tunnels still refuse it
+  }
+  // a ban you set, and one earned within the hour, still hold
+  g.apply({ t: "ban", ip: "198.51.100.12", b: { source: "manual", reason: "you", until: null, at: old } });
+  g.apply({ t: "ban", ip: "198.51.100.13", b: { source: "payload", reason: "just now", until: null, at: Date.now() } });
+  assert.equal(g.gate("198.51.100.12", open())?.status, 403);
+  assert.equal(g.gate("198.51.100.13", open())?.status, 403);
+  // what a request carries is still judged: payloads, attack tools, scanners
+  assert.equal(g.gate("203.0.113.1", open({ path: "/?id=1%20union%20select%20password%20from%20users--" }))?.status, 404);
+  assert.equal(g.gate("203.0.113.2", open({ path: "/.env" }))?.status, 404);
+  assert.equal(g.gate("203.0.113.3", open({ ua: "sqlmap/1.8" }))?.status, 404);
+  assert.equal(g.gate("203.0.113.4", open({ ua: "Mozilla/5.0 zgrab/0.x" }))?.status, 404);
+  for (let i = 0; i < 2; i++) g.gate("203.0.113.5", open({ path: "/.env" }));
+  assert.equal(g.gate("203.0.113.5", open())?.status, 403, "two payloads: banned, for this tunnel too");
+});
+test("the relay keeps only the bans a tunnel without address checks keeps too", () => {
+  const { g } = guard();
+  g.apply({ t: "ban", ip: "198.51.100.1", b: { source: "list", until: null, at: Date.now() } });
+  g.apply({ t: "ban", ip: "198.51.100.2", b: { source: "payload", until: null, at: Date.now() } });
+  g.apply({ t: "ban", ip: "198.51.100.3", b: { source: "payload", until: null, at: Date.now() - 2 * 3600e3 } });
+  g.apply({ t: "ban", ip: "198.51.100.4", b: { source: "manual", until: null, at: 1 } });
+  assert.deepEqual(g.edge().banned.length, 4);
+  assert.deepEqual(g.edge({ openTunnels: true }).banned.sort(), ["198.51.100.2", "198.51.100.4"]);
+});

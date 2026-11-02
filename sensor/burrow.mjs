@@ -172,7 +172,7 @@ export function observe(ip, info, res) {
   } catch { /* never in the way */ }
 }
 export function signedIn(ip) { guardObj?.trust(ip); }
-export function edge() { return guardObj ? guardObj.edge() : null; }
+export function edge(opts) { return guardObj ? guardObj.edge(opts) : null; }
 export function edgeVersion() { return guardObj ? guardObj.edgeVersion : -1; }
 export function scan(ip) {
   if (!guardObj) return;
