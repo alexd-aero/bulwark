@@ -278,17 +278,20 @@ export class Inspector {
         if (result.state === "ok") { this.cache.set(ck, { at: this.now(), result }); if (this.cache.size > 3000) this.cache.delete(this.cache.keys().next().value); }
       } catch (e) { job.results[s.id] = { state: "error", error: String(e.message || e).slice(0, 200), took: this.now() - t0 }; }
     });
-    job.done = Promise.all([this.localFor(ip).then((l) => { job.local = l; }), ...jobs]).then(async () => { job.local = await this.localFor(ip); job.running = false; });
+    job.localDone = this.localFor(ip).then((l) => { job.local = l; });
+    job.done = Promise.all([job.localDone, ...jobs]).then(async () => { job.local = await this.localFor(ip, job.local?.logs); job.running = false; });
     job.view = () => assemble(job);
     return job;
   }
 
   // what Bulwark itself knows
-  async localFor(ip) {
+  // logs: what an earlier call read (the log files are read once per inspection, and
+  // only back to when this address was first seen: an unknown one costs no disk at all)
+  async localFor(ip, logs = null) {
     const b = this.brain;
     if (!b) return null;
     const p = b.profiles.get(ip);
-    const logs = await b.logs.query({ ip, limit: 500 });
+    if (!logs) logs = await b.logs.query({ ip, limit: 500, since: p?.first ? p.first - 60e3 : Date.now() - 60e3 });
     const lists = b.feeds.lookup(ip);
     const v = b.verdicts.get(ip);
     const alerts = b.waves.list(300).filter((a) => a.members?.includes(ip)).map(({ id, key, title, sev, kind, open, first, last, members }) => ({ id, key, title, sev, kind, open, first, last, members: members.length }));

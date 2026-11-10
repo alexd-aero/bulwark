@@ -87,7 +87,8 @@ export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", 
   // the settings as the dashboard sees them: the AbuseIPDB key hidden; email only
   // while selfmail is there (else no mail* keys at all, and email: null)
   const settingsView = () => {
-    const email = brain.mailer.status(), out = { ...brain.settings, abuseipdbKey: brain.settings.abuseipdbKey ? "•".repeat(8) + brain.settings.abuseipdbKey.slice(-4) : "" };
+    const mask = (k) => (k ? "•".repeat(8) + k.slice(-4) : "");
+    const email = brain.mailer.status(), out = { ...brain.settings, abuseipdbKey: mask(brain.settings.abuseipdbKey), blocklistdeKey: mask(brain.settings.blocklistdeKey) };
     if (!email) for (const k of MAIL_KEYS) delete out[k];
     return { ...out, email };
   };
@@ -104,7 +105,7 @@ export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", 
       asn: brain.asn.lookup(ip), net24: netOf(ip), net16: netOf(ip, true), lists, intel, verdict: brain.verdicts.get(ip) ? { ...brain.verdicts.get(ip), intel: undefined } : null,
       coverage: brain.reporters.coverage(ip, lists, intel.error ? null : intel),
       alerts: brain.waves.list(300).filter((a) => a.members?.includes(ip)).map(({ id, title, sev, kind, open, first, last }) => ({ id, title, sev, kind, open, first, last })),
-      logs: await brain.logs.query({ ip, limit: 300 }),
+      logs: await brain.logs.query({ ip, limit: 300, since: p?.first ? p.first - 60e3 : Date.now() - 60e3 }),
     };
   };
   // an address's attack categories (requests per category), from its patterns
@@ -324,7 +325,7 @@ export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", 
       const job = inspector.inspect(ip, { fresh: q.fresh === "1" && !ins[2] });
       const wait = ins[2] ? 25000 : Math.min(8000, Number(q.wait) || 0);
       if (wait && job.running) { let t; await Promise.race([job.done, new Promise((r) => { t = setTimeout(r, wait); })]); clearTimeout(t); }
-      if (!job.local) await job.done.catch(() => {});
+      if (!job.local) await (job.localDone || job.done).catch(() => {});          // what's here, never the slowest outside source
       const view = job.view();
       if (ins[2]) {
         res.setHeader("Content-Disposition", `attachment; filename="bulwark-inspect-${ip.replace(/[:]/g, "-")}.json"`);
@@ -350,7 +351,8 @@ export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", 
         if (ipm[2] === "report") {
           const ev = brain.evidence(ip);
           if (!ev.lines.length) return send(res, 400, { error: "Nothing from this address to report: no payloads or probes on record." });
-          brain.reporters.enqueue({ ip, reason: brain.state.bans[ip]?.reason || "web attack", source: "manual-report", ...ev, last: Date.now() });
+          const r = brain.reporters.enqueue({ ip, reason: brain.state.bans[ip]?.reason || "web attack", source: "manual-report", ...ev, last: Date.now() });
+          return send(res, 200, { ...(await ipView(ip)), report: r });
         }
       } catch (e) { return send(res, 400, { error: e.message }); }
       return send(res, 200, await ipView(ip));
@@ -382,9 +384,18 @@ export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", 
     }
     if (path === "/lists" && m === "GET") return send(res, 200, { adds: brain.listAdds, lists: brain.feeds.view(), total: brain.feeds.total(), asn: brain.asn.view(), signatures: catalog(), categories: CATEGORIES, engine: matcherStats() });
     if (path === "/lists/refresh" && m === "POST") { await brain.feeds.refreshDue(true); return send(res, 200, { lists: brain.feeds.view(), total: brain.feeds.total() }); }
-    if (path === "/vendors" && m === "GET") return send(res, 200, { ...brain.reporters.view(), abuseipdb: !!brain.settings.abuseipdbKey, report: brain.settings.report });
+    if (path === "/vendors" && m === "GET") return send(res, 200, { ...brain.reporters.view(), abuseipdb: !!brain.settings.abuseipdbKey, report: brain.settings.report,
+                                                                      unreported: brain.bansList().filter((b) => ["payload", "campaign"].includes(b.source) && !b.reported && (b.at || 0) > Date.now() - 7 * DAY).length });
+    if (path === "/vendors/test" && m === "POST") { try { return send(res, 200, await brain.reporters.testAbuseipdb()); } catch (e) { return send(res, 400, { error: e.message }); } }
+    if (path === "/vendors/resume" && m === "POST") {
+      if (!brain.reporters.ready().length) return send(res, 409, { error: "Set up a vendor first: an AbuseIPDB key, or a blocklist.de account." });
+      return send(res, 200, { sent: brain.resumeReports(), ...brain.reporters.view() });
+    }
     if (path === "/history" && m === "GET") return send(res, 200, { last: brain.state.history?.last || null, hosts: [...brain.sensors].map((x) => x.info?.host).filter(Boolean) });
-    if (path === "/history/pull" && m === "POST") { brain.pullHistory(); return send(res, 200, { ok: true }); }
+    if (path === "/history/pull" && m === "POST") {
+      try { brain.pullHistory(); } catch (e) { return send(res, 409, { error: e.message }); }
+      return send(res, 200, { ok: true });
+    }
     if (path === "/email" && m === "GET") return send(res, 200, emailView());
     if (path === "/email/test" && m === "POST") {
       if (!brain.mailer.status()) return send(res, 404, { error: "selfmail isn't running.", email: null });
@@ -398,6 +409,12 @@ export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", 
           b.mailTo = String(b.mailTo || "").trim();
           if (b.mailTo && !validAddress(b.mailTo)) return send(res, 400, { error: "That isn't an email address." });
         }
+        // the key is never shown back, so an empty field means "keep it"; null clears it
+        for (const k of ["abuseipdbKey", "blocklistdeKey"]) {
+          if (b[k] === "" || b[k] === undefined || /^•+/.test(b[k] || "")) delete b[k];
+          else if (b[k] === null) b[k] = "";
+        }
+        const before = brain.reporters.ready().length, wasOn = brain.settings.report;
         for (const [k, def] of Object.entries(DEFAULT_SETTINGS)) {
           if (!(k in b)) continue;
           if (typeof def === "boolean") brain.state.settings[k] = !!b[k];
@@ -405,6 +422,8 @@ export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", 
           else brain.state.settings[k] = String(b[k] || "").trim().slice(0, 300);
         }
         brain.logs.keepDays = brain.state.settings.keepDays;
+        // a vendor just set up (or reporting back on): what waited goes out now
+        if (brain.reporters.ready().length > before || (!wasOn && brain.settings.report)) brain.resumeReports();
         brain.dirty = true; brain.save(true);
         brain.broadcast({ t: "settings", settings: { auto: brain.settings.auto, drop: brain.settings.drop, lookups: brain.settings.lookups, scanFirst: brain.settings.scanFirst } });
       }
@@ -414,9 +433,11 @@ export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", 
   }
 
   const server = createServer(async (req, res) => {
-    const url = new URL(req.url || "/", "http://x");
-    let path = url.pathname;
+    let url, path;
     try {
+      // a target URL can't parse (GET //[ HTTP/1.1): answered, never a crash
+      try { url = new URL(req.url || "/", "http://x"); } catch { return send(res, 400, { error: "bad request" }); }
+      path = url.pathname;
       // the key: a header from a host, a cookie, or ?k= once (then the cookie)
       const hostOnly = access === "host";
       const k = req.headers["x-bulwark-key"] || (hostOnly ? null : url.searchParams.get("k") || cookie(req));      // a fresh ?k= link wins over an old cookie

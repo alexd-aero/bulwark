@@ -32,8 +32,12 @@ export class Logs {
   loadToday() {
     // the last day's lines come back into memory, so a restart keeps the recent
     // past - only its tail is read: a day of a big wave is gigabytes
+    // (the newest day file, not only today's: ids go on from where they were, or a
+    // restart early in the day would reuse them and older lines would hide behind them)
     try {
-      const f = this.file(Date.now()), size = statSync(f).size, want = Math.min(size, 48e6);
+      const newest = this.days().pop();
+      if (!newest) return;
+      const f = join(this.dir, newest + ".jsonl"), size = statSync(f).size, want = Math.min(size, 48e6);
       const fd = openSync(f, "r"), b = Buffer.alloc(want);
       try { readSync(fd, b, 0, want, size - want); } finally { closeSync(fd); }
       let text = b.toString("utf8");
@@ -222,8 +226,9 @@ export class Profiles {
       p = { ip: e.ip, first: e.t, last: e.t, n: 0, bytes: 0, dec: {}, sigs: {}, seq: [], hosts: {}, uas: [], paths: [], cc: e.cc || "" };
       this.map.set(e.ip, p);
       if (this.map.size > this.max) this.evict();
-    } else { this.map.delete(e.ip); this.map.set(e.ip, p); }             // newest last (eviction order)
-    p.last = e.t; p.n++; p.bytes += e.b || 0;
+    } else if (e.t >= p.last) { this.map.delete(e.ip); this.map.set(e.ip, p); }   // newest last (eviction order); an old line (history) stays put
+    if (e.t >= p.last) p.last = e.t; else if (e.t < p.first) p.first = e.t;
+    p.n++; p.bytes += e.b || 0;
     p.dec[e.dec] = (p.dec[e.dec] || 0) + 1;
     if (e.cc) p.cc = e.cc;
     if (e.host) p.hosts[e.host] = (p.hosts[e.host] || 0) + 1;
@@ -240,7 +245,8 @@ export class Profiles {
   save() { try { atomicWrite(this.file, [...this.map]); } catch { /* next time */ } }
   recent(since, limit = 500) {
     const out = [];
-    for (const p of [...this.map.values()].reverse()) { if (p.last < since || out.length >= limit) break; out.push(p); }
-    return out;
+    // mostly newest last, but a profile first seen through history sits where it came in: look at all
+    for (const p of [...this.map.values()].reverse()) { if (out.length >= limit) break; if (p.last >= since) out.push(p); }
+    return out.sort((a, b) => b.last - a.last);
   }
 }

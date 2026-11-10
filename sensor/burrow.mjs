@@ -135,7 +135,7 @@ function loadLists() {
 export async function start(hostCtx) {
   ctx = hostCtx; stopped = false;
   cfg = loadConfig(); P = paths(cfg.home);
-  guardObj = new Guard({ log, emit: (m) => { if (!send(m) && pending.length < 2000) pending.push(m); if (m.t === "ban") { try { ctx?.kick?.(m.ip); } catch { /* best effort */ } } } });
+  guardObj = new Guard({ log, emit: (m) => { if (!send(m) && m.t !== "scan" && pending.length < 2000) pending.push(m); /* a scan ask is repeated anyway: bans must not be crowded out */ if (m.t === "ban") { try { ctx?.kick?.(m.ip); } catch { /* best effort */ } } } });
   // the last state the app left, so the guard is right from the first request
   try { if (existsSync(P.snapshot)) guardObj.apply({ t: "state", ...JSON.parse(readFileSync(P.snapshot, "utf8")) }); } catch (e) { log("snapshot:", e.message); }
   loadLists();

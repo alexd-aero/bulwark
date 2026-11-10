@@ -73,13 +73,28 @@ const FOLD = { "­": "-", "‐": "-", "‑": "-", "−": "-", "∕": "/", "⁄":
                "․": ".", "‥": "..", "…": "...", "﹒": ".", "。": ".", "ʼ": "'", "‘": "'", "’": "'", "“": '"', "”": '"',
                "‹": "<", "›": ">", "˂": "<", "˃": ">", "〈": "<", "〉": ">", "＜": "<", "＞": ">" };
 const FOLD_RE = /[­‐‑−∕⁄⧸∖⧹․‥…﹒。ʼ‘’“”‹›˂˃〈〉！-～]/g;
+// enclosed and styled letters and digits (①②⑦, ⓐ, 𝐚, ｓ) fold under NFKC; scripts
+// people write in (Cyrillic, CJK, Arabic) don't change, so only a change is evasion
+const COMPAT = /[\u2460-\u24ff\u2070-\u209f\u2100-\u214f\u3200-\u33ff\ufe50-\ufe6f\uff00-\uffef\ud835]/;
 export function fold(s, flags) {
   if (!/[^\x00-\x7f]/.test(s)) return s;
-  return s.replace(FOLD_RE, (c) => {
+  let out = s.replace(FOLD_RE, (c) => {
     flags.fold = true;
     const code = c.charCodeAt(0);
     if (code >= 0xff01 && code <= 0xff5e) return String.fromCharCode(code - 0xfee0);      // fullwidth
     return FOLD[c] ?? c;
+  });
+  if (COMPAT.test(out)) { const n = out.normalize("NFKC"); if (n !== out) { flags.fold = true; out = n; } }
+  // U+560A / U+560D ("嘊嘍"): servers that keep the low byte read them as LF / CR
+  if (/[\u560a\u560d\u010a\u010d]/.test(out)) { flags.crlf16 = true; out = out.replace(/[\u560a\u010a]/g, "\n").replace(/[\u560d\u010d]/g, "\r"); }
+  return out;
+}
+// JavaScript and C escapes (\u0027, \x3c, \u{61}) that a template or a JSON parser undoes
+export function unescapeJs(s) {
+  if (s.indexOf("\\") < 0 || !/\\(u\{?[0-9a-f]|x[0-9a-f]{2})/i.test(s)) return s;
+  return s.replace(/\\u\{([0-9a-f]{1,6})\}|\\u([0-9a-f]{4})|\\x([0-9a-f]{2})/gi, (m, a, b, c) => {
+    const cp = parseInt(a || b || c, 16);
+    return cp <= 0x10ffff ? String.fromCodePoint(cp) : m;
   });
 }
 
@@ -133,7 +148,8 @@ const NEEDS = /[%&\\\u0000-\u001f\u007f-￿]|\/\.|\/\//;
 //   query     the query string, decoded value by value (& kept as the separator)
 //   params    [[name, value]] decoded (at most 64)
 //   nparams   how many there were
-//   flags     what had to be undone: double, unicode, overlong, nul, backslash, entity, fold
+//   flags     what had to be undone: double, unicode, overlong, nul, backslash, entity, fold,
+//             jsesc (\\u0027), crlf16 (U+560A as a line feed)
 export function normalize(target) {
   const raw = String(target || "");
   const q = raw.indexOf("?");
@@ -166,6 +182,7 @@ function value(v, flags) {
   if (v.indexOf("+") >= 0) v = v.replace(/\+/g, " ");
   if (!NEEDS.test(v)) return v;
   v = entities(fold(decodeDeep(v, flags), flags), flags);
+  if (v.indexOf("\\") >= 0) { const u = unescapeJs(v); if (u !== v) { flags.jsesc = true; v = u; } }
   if (v.indexOf("\u0000") >= 0) { flags.nul = true; v = v.replace(/\u0000/g, ""); }
   return v;
 }

@@ -59,14 +59,14 @@ export class Waves {
     this.hosts = new Map();           // host -> {mine: t, found: t|null, strangers: Map(ip -> t)}
     try {
       const s = JSON.parse(readFileSync(file, "utf8"));
-      this.alerts = new Map(s.alerts || []); this.base = s.base || {};
-      this.hosts = new Map((s.hosts || []).map(([h, x]) => [h, { ...x, strangers: new Map(x.strangers || []) }]));
+      this.alerts = new Map(s.alerts || []); this.base = s.base || {}; this.lastMinute = s.lastMinute || 0;
+      this.hosts = new Map((s.hosts || []).map(([h, x]) => [h, { ...x, strangers: new Map(x.strangers || []), lastStranger: x.lastStranger || Math.max(0, ...(x.strangers || []).map(([, at]) => at)) }]));
     } catch { /* first run */ }
   }
   save() {
     const hosts = [...this.hosts].map(([h, x]) => [h, { ...x, strangers: [...x.strangers].slice(-50) }]);
     const alerts = [...this.alerts].sort((a, b) => b[1].last - a[1].last).slice(0, 300);
-    try { writeFileSync(this.file + ".tmp", JSON.stringify({ alerts, base: this.base, hosts })); renameSync(this.file + ".tmp", this.file); } catch { /* next time */ }
+    try { writeFileSync(this.file + ".tmp", JSON.stringify({ alerts, base: this.base, hosts, lastMinute: this.lastMinute })); renameSync(this.file + ".tmp", this.file); } catch { /* next time */ }
   }
 
   // ------------------------------------------------------------ one request
@@ -80,9 +80,12 @@ export class Waves {
       if (mine) h.mine = t;
       else {
         if (!h.strangers.has(e.ip)) {
+          // found = the first stranger after a week of only you; strangers who were there all along are not news
+          const alone = !h.lastStranger || t - h.lastStranger > 7 * 24 * 60 * MIN;
+          h.lastStranger = t;
           h.strangers.set(e.ip, t);
           if (h.strangers.size > 200) h.strangers.delete(h.strangers.keys().next().value);
-          if (!h.found && h.mine) h.found = t;          // it had been yours alone until now
+          if (alone && h.mine) h.found = t;             // it had been yours alone until now
           if (h.found && t - h.found < 15 * MIN) {
             const crowd = [...h.strangers].filter(([, at]) => at >= h.found);
             if (crowd.length >= 2) this.raise(`discovery:${e.host}`, {
@@ -126,7 +129,7 @@ export class Waves {
         const label = key.startsWith("as:") ? `${e.org || "AS" + e.asn} (AS${e.asn})` : key.slice(4);
         this.raise(`network:${key}`, {
           kind: "network", sev: m.size >= need * 2 ? "critical" : "warn",
-          title: `${m.size} addresses from ${label} probing`, detail: `within 30 minutes, from one ${key.startsWith("as:") ? "network" : key.endsWith("/16") ? "/16" : "/24"}.`,
+          title: `${m.size} addresses from ${label} probing`, detail: `within 30 minutes, from one ${key.startsWith("as:") ? "network" : key.slice(key.lastIndexOf("/"))}.`,
           members: this.joined(`network:${key}`, m, e.ip), network: label,
         }, t);
       }
@@ -189,6 +192,8 @@ export class Waves {
   // open or update an alert; tell the app when it is new or got worse
   raise(key, x, t) {
     let a = this.alerts.get(key);
+    // you dismissed it: the same wave goes on quietly (no new alert, mail or notice) for two hours
+    if (a && !a.open && a.dismissed && t - (a.closed || 0) < 120 * MIN) { a.last = t; return a; }
     const fresh = !a || !a.open;
     if (fresh) a = { id: `${key}|${t}`, key, first: t, arrivals: [], members: [], open: true, sev: "info" };
     const before = SEV[a.sev] ?? 0;

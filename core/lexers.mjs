@@ -11,10 +11,14 @@
 // ------------------------------------------------------------------ SQL
 const STMT = new Set(["select", "insert", "update", "delete", "drop", "create", "alter", "exec", "execute", "declare", "truncate", "shutdown", "merge", "call"]);
 const LOGIC = new Set(["and", "or", "xor"]);
-const OPW = new Set(["like", "rlike", "regexp", "between", "is", "in", "div", "mod", "sounds", "not"]);
+const OPW = new Set(["like", "rlike", "regexp", "between", "is", "in", "div", "mod", "sounds", "not", "eq", "ne", "gt", "lt", "ge", "le"]);
+const COND = new Set(["having", "where"]);
 const KW = new Set(["from", "where", "having", "group", "order", "by", "limit", "offset", "into", "values", "table", "database", "schema", "case", "when", "then",
                     "else", "end", "null", "true", "false", "all", "distinct", "as", "join", "procedure", "outfile", "dumpfile", "information_schema", "sysobjects",
-                    "syscolumns", "waitfor", "delay", "top", "char", "nchar", "varchar", "convert", "cast", "concat", "ascii", "substring", "mid", "count", "if"]);
+                    "syscolumns", "waitfor", "delay", "top", "char", "nchar", "varchar", "convert", "cast", "concat", "ascii", "substring", "mid", "count", "if", "dual"]);
+const BOOL = new Set(["true", "false", "null"]);
+// keywords that a parenthesis may follow without making them a call
+const CLAUSE = new Set(["when", "then", "else", "case", "from", "in", "on", "by", "values", "end", "as", "into", "join"]);
 // functions that only an injection calls (time-based, error-based, file access)
 const DANGER = new Set(["sleep", "pg_sleep", "benchmark", "extractvalue", "updatexml", "load_file", "sys_eval", "sys_exec", "xp_cmdshell", "xp_dirtree",
                         "randomblob", "dbms_pipe", "utl_inaddr", "utl_http", "make_set", "elt", "exp", "geometrycollection", "multipoint", "polygon", "gtid_subset"]);
@@ -55,7 +59,10 @@ function tokens(s, max = 24) {
       else if (STMT.has(lw)) out.push({ t: "E" });
       else if (LOGIC.has(lw)) out.push({ t: "&" });
       else if (OPW.has(lw)) out.push({ t: "o" });
+      else if (COND.has(lw)) out.push({ t: "w" });
+      else if (BOOL.has(lw)) out.push({ t: "n", w: lw });
       else if (DANGER.has(lw) && call) out.push({ t: "F", w: lw });
+      else if (CLAUSE.has(lw)) out.push({ t: "k", w: lw });
       else if (INFO.has(lw)) out.push({ t: "k", w: lw, info: true });
       else if (call) out.push({ t: "f", w: lw });
       else if (KW.has(lw)) out.push({ t: "k", w: lw });
@@ -71,20 +78,29 @@ function tokens(s, max = 24) {
 }
 const fp = (ts) => ts.map((x) => x.t).join("");
 
-// the shapes of an injection, over a fingerprint
+// the shapes of an injection, over a fingerprint. A leading sign ("-1 OR …") is
+// part of the value, so most shapes allow one.
 const CRIT = [
-  [/^[sn]\)*&\(*[sn]\)*o\(*[sn]/, "a tautology after a closed string (' OR '1'='1)"],
-  [/^s\)*&\(*[sn]\)*(c|$)/, "a closed string and a condition, the rest commented out"],
+  [/^o?[sn]\)*&\(*[sn]\)*o\(*[snfvF(]/, "a tautology after a closed string (' OR '1'='1)"],
+  [/^s\)*&\(*[sn]\)*c/, "a closed string and a condition, the rest commented out"],
+  [/^s\)*&\(*n\)*$/, "a closed string and a condition (' OR 1)"],
   [/^s\)*o?c/, "a string closed early, the rest commented out (admin'--)"],
-  [/^[sn]\)*;\(*E/, "a second statement after a closed string ('; DROP …)"],
+  [/^o?[sn]\)*;\(*[Ek]/, "a second statement after a value ('; DROP …)"],
   [/^o?[sn]?\)*Uk?\(*E/, "UNION SELECT after a value"],
   [/Uk?\(*E\(*[nfFkvso,(]/, "UNION SELECT"],
-  [/^[sn]\)*&\(*F/, "a time- or error-based function after a value (' AND SLEEP(5))"],
-  [/^[sn]\)*o\(*F/, "a function call glued to a value (1'+sleep(5))"],
-  [/^[sn]\)*kk?n\)*(c|$)/, "ORDER BY / GROUP BY column probing"],
+  [/^o?[sn]\)*&\(*F/, "a time- or error-based function after a value (' AND SLEEP(5))"],
+  [/^o?[sn]\)*o\(*F/, "a function call glued to a value (1'+sleep(5))"],
+  [/^o?[sn]\)*kk?n(,n)*\)*(c|$)/, "ORDER BY / GROUP BY column probing"],
+  [/^o?[sn]\)*&.*(F|\(E|E[nfFvo(])/, "a condition with a subquery (' AND (SELECT …))"],
+  [/^o?[sn]\)*&\(*E/, "a subquery joined to a value ('||(SELECT …)||')"],
+  [/\(+E\(*[nfFvo(]/, "a subquery ((SELECT …))"],
+  [/\(+Ekk\(*[snb]o[snb]/, "a subquery with CASE WHEN (a boolean oracle)"],
+  [/^o?[sn]\)*w\(*[sn]\)*o\(*[sn]/, "HAVING / WHERE with a tautology"],
+  [/(^|\()kk\(*[snb]o[snb]\)*k/, "CASE WHEN … THEN (a conditional in a sort or a column)"],
+  [/s&\(*[sn]\)*o\(*[sn]/, "a tautology after a closed string (x' or 1 eq 1)"],
 ];
 const HIGH = [
-  [/^[sn]\)*&\(*[snbv]\)*o\(*[snbv]/, "a condition after a value (1 OR a=a)"],
+  [/^o?[sn]\)*&\(*[snbvf]\)*o\(*[snbvf]/, "a condition after a value (1 OR a=a)"],
   [/^[sn]\)*&\(*[sn]$/, "a boolean condition after a closed string"],
 ];
 
@@ -92,17 +108,23 @@ export function sqli(v) {
   if (!v || v.length < 2) return null;
   const low = v.toLowerCase();
   // a cheap gate: nothing an injection needs, no tokenizing
-  if (!/['"`]|\b(or|and|xor|union|select|sleep|benchmark|waitfor|order|group|having|exec|drop|insert|update|delete|extractvalue|updatexml|information_schema|load_file)\b|--|#|\/\*|;|@@|\|\||&&/.test(low)) return null;
+  if (!/['"`]|\b(or|and|xor|union|select|sleep|pg_sleep|benchmark|waitfor|order|group|having|case|exec|drop|insert|update|delete|extractvalue|updatexml|information_schema|load_file|randomblob|dbms_pipe|utl_inaddr)\b|--|#|\/\*|;|@@|\|\||&&/.test(low)) return null;
   if (/\bwaitfor\s+delay\s+['"]\d/.test(low)) return { sev: "critical", why: "WAITFOR DELAY (time-based blind)" };
   if (/\binto\s+(out|dump)file\b/.test(low) && /\bselect\b/.test(low)) return { sev: "critical", why: "SELECT … INTO OUTFILE (writing a file)" };
   if (/\bxp_cmdshell\b/.test(low)) return { sev: "critical", why: "xp_cmdshell (commands through SQL Server)" };
+  if (/\b(dbms_pipe\s*\.\s*receive_message|dbms_lock\s*\.\s*sleep|utl_inaddr\s*\.\s*get_host_\w+|utl_http\s*\.\s*request|ctxsys\s*\.\s*drithsx|dbms_xmlgen)\s*\(/.test(low)) return { sev: "critical", why: "an Oracle time- or network-based probe (DBMS_PIPE, UTL_INADDR)" };
+  // a delay with a number of seconds is only ever a timing probe (sqlmap, Burp)
+  if (/\b(sleep|pg_sleep|benchmark)\s*\(\s*\d/.test(low) && /^[\s\w'"`()=,.*+\-\/|&!<>@:;#]*$/.test(low) && !/^[a-z\s]+$/.test(low)) return { sev: "critical", why: "a time-based SQL probe (SLEEP / BENCHMARK)" };
+  if (/^\s*@@(version|datadir|hostname|basedir|servername)\b/.test(low)) return { sev: "critical", why: "database fingerprinting (@@version)" };
+  // sqlmap's and Burp's first move: a value with both quotes, to see what breaks
+  if (/^[\w.-]{0,20}(['"`]\)?){2,3}\s*$/.test(v) && /'/.test(v) && /"/.test(v)) return { sev: "medium", why: "a quote probe (1'\")" };
   let best = null;
   const consider = (ts, quoted) => {
     const f = fp(ts);
     for (const [re, why] of CRIT) if (re.test(f)) return { sev: "critical", why, fp: f };
     if (ts.some((x) => x.t === "F" && ["extractvalue", "updatexml", "load_file", "sys_eval", "sys_exec", "gtid_subset"].includes(x.w))) return { sev: "critical", why: "an error-based or file-reading SQL function", fp: f };
     if (ts.some((x) => x.t === "E") && ts.some((x) => x.info)) return { sev: "critical", why: "reading the database's catalog (information_schema)", fp: f };
-    for (const [re, why] of HIGH) if (re.test(f)) return { sev: quoted ? "critical" : "high", why, fp: f };
+    if (quoted || f !== "s&s") for (const [re, why] of HIGH) if (re.test(f)) return { sev: quoted ? "critical" : "high", why, fp: f };     // "cats" OR "dogs" is a search
     if (ts.some((x) => x.t === "F")) return { sev: "high", why: "a time-based SQL function (sleep, benchmark)", fp: f };
     if (ts.some((x) => x.info) || ts.some((x) => x.t === "v") && /@@(version|datadir|hostname|basedir)/.test(low)) return { sev: "high", why: "database fingerprinting (@@version, information_schema)", fp: f };
     return null;
@@ -150,10 +172,18 @@ export function xss(v) {
     if (/^(img|image|video|audio|source|input|body|details|select|textarea|keygen|button|a|div|x|iframe)$/.test(name) && /\b(src|href)\s*=/.test(a) && SINK.test(a)) up("high", `<${name}> carrying script`);
   }
   if (worst?.sev === "critical") return worst;
+  // javascript: anywhere a URL is read (meta refresh, CSS url(), a bare attribute)
+  if (/(\burl\s*[=(]\s*["'`]?|\b(href|src|action|data|formaction|content)\s*=\s*["'`]?[^"'`>]{0,40}?)\s*(java|vb)script\s*:/i.test(low)) return { sev: "critical", why: "a javascript: URL inside markup" };
+  if (/<\s*(object|embed|iframe)\b[^>]*\b(data|src)\s*=\s*["'`]?\s*data\s*:/i.test(low)) return { sev: "critical", why: "a data: document in an embedded frame" };
+  if (/<\s*(embed|object|applet)\b[^>]*\b(src|data|code)\s*=\s*["'`]?\s*(\/\/|https?:|data:)/i.test(low)) return { sev: "critical", why: "an embedded object loaded from elsewhere" };
+  if (/<\s*base\b[^>]*\bhref\s*=/i.test(low)) return { sev: "critical", why: "<base href>: every relative link sent elsewhere" };
+  if (/<\s*style\b[^>]*>[^<]*(@import|expression\s*\(|url\s*\()/i.test(low)) return { sev: "critical", why: "a <style> block loading from elsewhere" };
+  // AngularJS / Vue template injection that ends in script
+  if (/\{\{[^}]{0,80}(constructor\s*[.\[]|\$on\s*\.|\$eval|\$emit|\$\$|alert|prompt|confirm|toString\(\)\.constructor)/i.test(s)) return { sev: "critical", why: "client-side template injection ({{constructor.constructor(…)}})" };
   // breaking out of an attribute: a quote, then an event handler
-  if (/["'`][\s\/]*on[a-z]{3,30}\s*=/.test(low) && SINK.test(s)) up("critical", "an attribute broken out of, with an event handler");
+  if (/["'`][\s\/]*([a-z-]+(=[^\s>]*)?[\s\/]+){0,3}on[a-z]{3,30}\s*=/.test(low) && SINK.test(s)) up("critical", "an attribute broken out of, with an event handler");
   // breaking out of a JavaScript string: a quote, an operator, a sink
   else if (/["'`]\s*[;)+\-*\/|&,]+\s*(\(|\b)/.test(low) && SINK.test(s) && /["'`]\s*[;)+\-*\/|&,]+\s*[a-z(\[]*\s*(alert|prompt|confirm|eval|fetch|import|document|window|top|self|location|settimeout|function|string\.fromcharcode)/i.test(s)) up("critical", "a JavaScript string broken out of (';alert(1)//)");
-  else if (/\b(alert|prompt|confirm)\s*(\(|`)\s*(document\s*\.|\d+\s*[)`]|['"`][^'"`]{0,20}['"`]\s*\))/.test(low)) up("high", "an alert(…) proof of concept");
+  else if (/\b(alert|prompt|confirm|print)\s*(\(|`)\s*(document\s*\.|window\s*\.|\d+\s*[)`]|['"`][^'"`]{0,20}['"`]\s*\)|\/\w*\/\s*\.source)/.test(low) && !/\bprint\s*\(\s*['"`]/.test(low)) up("critical", "an alert(…) proof of concept");
   return worst;
 }

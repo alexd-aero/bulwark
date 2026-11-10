@@ -17,7 +17,9 @@
 //   behaviour                  per address, in one-minute windows (bounded): request
 //                              floods, 4xx-heavy wordlist scanning across many paths,
 //                              login hammering (brute force, credential stuffing),
-//                              method fuzzing. Counted like hits
+//                              method fuzzing, sweeps through many probes (even
+//                              when an app answers 200 to everything), and many
+//                              kinds of attack from one address. Counted like hits
 //   known services             (GreyNoise "benign": crawlers, research scanners)
 //                              aren't banned for probes, behaviour or a list mark;
 //                              but two payloads ban even them: an index of leaked
@@ -163,7 +165,7 @@ export class Guard {
       return { status: 403, body: "Blocked.", why: ban.reason, page: "blocked" };
     }
     // behaviour this minute: what the request alone can't show
-    const extra = this.behave(ip, info, bw, now);
+    const extra = this.behave(ip, info, bw, now, sig);
     if (extra) sig = verdictOf([...(sig.list || []), ...extra]);
     mark();
     const lists = open ? [] : lookupIn(this.lists, ip);
@@ -216,14 +218,14 @@ export class Guard {
   // This minute's behaviour for an address: counted here (requests, methods,
   // sign-in attempts) and in after() (what the app answered). Each signal fires
   // once a window. -> null | [hits]
-  behave(ip, info, bw, now) {
+  behave(ip, info, bw, now, sig) {
     const w = Math.floor(now / WINDOW);
     let b = this.behav.get(ip);
     if (!b) {
-      b = { w, n: 0, nf: 0, lp: 0, lf: 0, segs: null, meth: 0, fired: 0 };
+      b = { w, n: 0, nf: 0, lp: 0, lf: 0, segs: null, meth: 0, fired: 0, pr: null, cats: null };
       this.behav.set(ip, b);
       if (this.behav.size > MAX_TRACKED) this.behav.delete(this.behav.keys().next().value);
-    } else if (b.w !== w) { b.w = w; b.n = 0; b.nf = 0; b.lp = 0; b.lf = 0; b.segs = null; b.meth = 0; b.fired = 0; }
+    } else if (b.w !== w) { b.w = w; b.n = 0; b.nf = 0; b.lp = 0; b.lf = 0; b.segs = null; b.meth = 0; b.fired = 0; b.pr = null; b.cats = null; }
     b.n++;
     bw.b = b;
     const m = info.method;
@@ -240,6 +242,14 @@ export class Guard {
     else if (b.lf >= 10) fire(8, H("brute-force", "high", `${b.lf} failed sign-ins in a minute`));
     let k = b.meth, bits = 0; while (k) { bits += k & 1; k >>>= 1; }
     if (bits >= 3) fire(16, H("method-fuzz", "medium", "several unusual HTTP methods in a minute"));
+    // what the requests themselves asked for, this minute: a sweep through many probes
+    // (an app that answers 200 to everything never says "not here"), or many kinds of attack
+    if (sig?.id && !sig.label && sig.pts > 0) {
+      if (sig.probe) { if (!b.pr) b.pr = new Set(); if (b.pr.size < 32) b.pr.add(firstSeg(info.path) + "|" + sig.id + "|" + String(info.path).length); }
+      if (sig.cat && sig.cat !== "bot") { if (!b.cats) b.cats = new Set(); for (const h of sig.list || []) if (h.cat && h.cat !== "bot" && h.cat !== "dos" && h.cat !== "protocol" && (h.sev !== "info")) b.cats.add(h.cat); }
+      if (b.pr && b.pr.size >= 8) fire(32, H("probe-sweep", "high", `${b.pr.size} different probes in a minute`));
+      if (b.cats && b.cats.size >= 4) fire(64, H("multi-vector", "high", `${b.cats.size} kinds of attack in a minute (${[...b.cats].slice(0, 5).join(", ")})`));
+    }
     return out;
   }
   // When the response is done (the host's observe): what the app answered.

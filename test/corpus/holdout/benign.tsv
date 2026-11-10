@@ -1,0 +1,291 @@
+# bw-holdout benign corpus — legitimate traffic a naive WAF might wrongly flag
+# format: ok<TAB>target[<TAB>M=METHOD][<TAB>H:Header=value]
+#
+# ============ SEARCH QUERIES WITH QUOTES / SQL-ISH / CODE ============
+ok	/search?q=O'Brien
+ok	/search?q=d'Angelo restaurant
+ok	/search?q=can't connect to database
+ok	/search?q=SELECT statement tutorial
+ok	/search?q=how to use UNION in SQL
+ok	/search?q=difference between INNER JOIN and LEFT JOIN
+ok	/search?q=DROP TABLE explained for beginners
+ok	/search?q=1=1 always true in boolean algebra
+ok	/search?q=script tag not rendering in react
+ok	/search?q=why does alert() block my page
+ok	/search?q=onclick handler best practices
+ok	/search?q=escape < and > in html
+ok	/search?q=C++ vector<int> initialization
+ok	/search?q=std::map<string, int> example
+ok	/search?q=regex for matching ../relative/paths
+ok	/search?q=what does $_GET do in php
+ok	/search?q=os.system vs subprocess in python
+ok	/search?q=${HOME} not expanding in makefile
+ok	/search?q=jinja2 {{ variable }} not showing
+ok	/search?q=powershell -encodedcommand usage
+ok	/search?q=git reset --hard origin/main
+ok	/search?q=etc/passwd permissions linux
+ok	/search?q=café résumé naïve façade
+ok	/search?q=Beyoncé tickets 2026
+ok	/search?q=Mötley Crüe tour dates
+ok	/search?q=北京烤鸭 recipe
+ok	/search?q=emoji 🎉 party supplies
+ok	/search?q=100%25 cotton t-shirt
+ok	/search?q=price range %2425-%2450
+ok	/search?q=2+2=4 math worksheet
+ok	/search?q=a%26w root beer near me
+ok	/search?q=AT%26T customer service
+ok	/search?q=rock %26 roll hall of fame
+ok	/products?q=men's running shoes size 10.5
+ok	/products?category=home%20%26%20garden
+ok	/blog/2026/01/using-eval-safely-in-javascript
+ok	/blog/understanding-the-same-origin-policy
+ok	/docs/api/select-and-filter
+ok	/help?topic=reset password
+#
+# ============ OAUTH / OIDC / SAML CALLBACKS ============
+ok	/oauth/callback?code=4%2F0AVHEtk7xQ9mXqZ&state=abc123def456&scope=email%20profile
+ok	/auth/google/callback?code=4%2F0Ax7Hs8_ab-cd&scope=openid+email&authuser=0&prompt=consent
+ok	/callback?code=AQABAAIAAAD&session_state=7a1b2c3d&state=eyJyZXR1cm4iOiIvIn0
+ok	/signin-oidc	M=POST	H:Content-Type=application/x-www-form-urlencoded
+ok	/auth/callback?code=gho_16C7e42F292c6912&state=xyz
+ok	/saml/acs	M=POST	H:Content-Type=application/x-www-form-urlencoded
+ok	/.well-known/openid-configuration
+ok	/.well-known/jwks.json
+ok	/oauth2/authorize?response_type=code&client_id=abc&redirect_uri=https://app.example.com/cb&scope=openid%20profile%20email&state=s&nonce=n&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256
+ok	/login?returnTo=https://app.example.com/dashboard
+ok	/connect/token	M=POST	H:Authorization=Basic Y2xpZW50OnNlY3JldA==
+ok	/logout?returnTo=https://app.example.com/
+ok	/sso/saml?SAMLRequest=fZJbb9owFMff%2BxQo7yExTkqwSKq2aBpSt1Ux9rCXyXFOi
+#
+# ============ TRACKING / MARKETING PARAMS ============
+ok	/?utm_source=newsletter&utm_medium=email&utm_campaign=spring_sale&utm_content=cta_button
+ok	/landing?gclid=EAIaIQobChMI_abc123&utm_source=google
+ok	/?fbclid=IwAR2abcdefGHIjklmnop
+ok	/product/42?ref=homepage&variant=blue&sku=SKU-1234-XL
+ok	/?mc_cid=a1b2c3&mc_eid=d4e5f6
+ok	/article?msclkid=00112233445566778899aabbccddeeff
+ok	/?_ga=GA1.2.123456789.1234567890&_gl=1*abc*_ga
+ok	/?yclid=1234567890123456789
+ok	/promo?coupon=SAVE20%25&ref=partner
+#
+# ============ JSON / GRAPHQL IN QUERY ============
+ok	/api/items?filter={"status":"active","price":{"gte":10,"lte":50}}
+ok	/api/search?query={"match":{"title":"hello world"}}
+ok	/graphql?query={viewer{name email repositories(first:10){nodes{name}}}}
+ok	/graphql?query=query($id:ID!){user(id:$id){name}}&variables={"id":"42"}
+ok	/api/v2/articles?filter[author]=5&filter[published]=true&sort=-created_at
+ok	/jsonapi/node/article?filter[title][operator]=CONTAINS&filter[title][value]=news
+ok	/api/users?page[number]=2&page[size]=20&include=comments,author
+ok	/api/data?where={"and":[{"age":{"gt":18}},{"country":"US"}]}
+ok	/rest/v1/orders?select=id,total,customer(name)&status=eq.shipped
+ok	/api/report?group_by=day&metric=revenue&from=2026-01-01&to=2026-01-31
+#
+# ============ BASE64 / JWT TOKENS ============
+ok	/api/verify?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dGVzdA
+ok	/download?data=SGVsbG8gV29ybGQgdGhpcyBpcyBiYXNlNjQ%3D
+ok	/img?src=data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==
+ok	/unsubscribe?u=dXNlckBleGFtcGxlLmNvbQ%3D%3D&list=newsletter
+ok	/confirm?token=YWJjMTIzZGVmNDU2Z2hpNzg5
+ok	/api/profile	H:Authorization=Bearer eyJhbGciOiJSUzI1NiIsImtpZCI6IjEifQ.eyJzdWIiOiJ1c2VyIn0.abc
+ok	/reset?token=a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6
+#
+# ============ FILENAMES WITH DOTS / PARENS / UNICODE ============
+ok	/files/report.final.v2.pdf
+ok	/files/Q1 2026 Budget (draft).xlsx
+ok	/files/photo (1).jpg
+ok	/files/résumé_john_doe.docx
+ok	/downloads/archive.tar.gz
+ok	/downloads/my.app.bundle.min.js
+ok	/uploads/invoice_2026.01.15.pdf
+ok	/media/song - artist (remix).mp3
+ok	/docs/README.md
+ok	/files/data[2026].csv
+ok	/files/notes.txt.bak.old
+ok	/assets/логотип.svg
+ok	/files/プレゼン資料.pptx
+ok	/d/Screenshot 2026-01-10 at 3.45.12 PM.png
+#
+# ============ API PATHS (REST, versioned) ============
+ok	/api/v1/users/12345/profile
+ok	/api/v2/orders/abc-def-123/items
+ok	/api/users/me
+ok	/api/v1/products?limit=20&offset=40&sort=price_asc
+ok	/v1/accounts/acct_1A2b3C/charges	M=POST
+ok	/api/health
+ok	/api/v3/search?q=laptop&category=electronics&in_stock=true
+ok	/api/users/550e8400-e29b-41d4-a716-446655440000
+ok	/api/v1/webhooks	M=POST	H:Content-Type=application/json
+ok	/api/documents/42	M=PATCH	H:Content-Type=application/json
+ok	/api/items/99	M=DELETE	H:Authorization=Bearer abc.def.ghi
+ok	/api/v1/me/settings	M=PUT	H:Content-Type=application/json
+#
+# ============ CMS / SPA / BUILD TOOL ASSETS ============
+ok	/_next/static/chunks/pages/index-a1b2c3d4.js
+ok	/_next/static/css/5f3e2a1b.css
+ok	/_next/image?url=%2Fhero.jpg&w=1920&q=75
+ok	/_next/data/build123/products.json
+ok	/@vite/client
+ok	/node_modules/.vite/deps/react.js
+ok	/src/main.tsx?t=1736500000000
+ok	/assets/index-Dk3jf8aZ.js
+ok	/static/js/main.4b8f2c1a.chunk.js
+ok	/dist/bundle.min.js?v=2.4.1
+ok	/wp-content/themes/twentytwentyfour/style.css?ver=1.0
+ok	/wp-content/plugins/woocommerce/assets/css/woocommerce.css?ver=8.5
+ok	/wp-includes/js/jquery/jquery.min.js?ver=3.7.1
+ok	/sites/default/files/css/css_abc123.css
+ok	/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js
+ok	/favicon.ico
+ok	/manifest.webmanifest
+ok	/sw.js
+ok	/service-worker.js
+ok	/robots.txt
+ok	/sitemap.xml
+ok	/apple-touch-icon.png
+#
+# ============ .well-known PATHS ============
+ok	/.well-known/security.txt
+ok	/.well-known/apple-app-site-association
+ok	/.well-known/assetlinks.json
+ok	/.well-known/acme-challenge/pdfK8x2abcXYZ_token-value-here
+ok	/.well-known/change-password
+ok	/.well-known/host-meta
+ok	/.well-known/webfinger?resource=acct:user@example.com
+ok	/.well-known/nostr.json?name=bob
+ok	/.well-known/matrix/server
+ok	/.well-known/mta-sts.txt
+#
+# ============ DAV / OTHER METHODS ============
+ok	/calendar/	M=PROPFIND	H:Depth=1
+ok	/dav/file.txt	M=PUT	H:Content-Type=text/plain
+ok	/dav/old.txt	M=MOVE	H:Destination=https://files.example.com/dav/new.txt
+ok	/api/resource	M=OPTIONS
+ok	/api/items/5	M=HEAD
+ok	/caldav/	M=REPORT	H:Content-Type=application/xml
+ok	/webdav/doc.docx	M=COPY	H:Destination=/webdav/backup/doc.docx
+ok	/api/graphql	M=OPTIONS	H:Access-Control-Request-Method=POST
+#
+# ============ REDIRECT PARAMS TO NORMAL SITES ============
+ok	/out?url=https://en.wikipedia.org/wiki/HTTP
+ok	/redirect?to=https://github.com/login
+ok	/link?target=https://www.google.com/search?q=hello
+ok	/go?url=https://docs.example.com/getting-started
+ok	/share?u=https://news.ycombinator.com/item?id=123456
+ok	/click?dest=https://www.youtube.com/watch?v=dQw4w9WgXcQ
+ok	/login?next=/dashboard/analytics
+ok	/signin?return_url=%2Fsettings%2Fbilling
+#
+# ============ COMMON USER-AGENTS ============
+ok	/	H:User-Agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36
+ok	/	H:User-Agent=Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1
+ok	/	H:User-Agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15
+ok	/	H:User-Agent=Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)
+ok	/	H:User-Agent=Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)
+ok	/	H:User-Agent=facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)
+ok	/	H:User-Agent=Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)
+ok	/	H:User-Agent=Twitterbot/1.0
+ok	/	H:User-Agent=WhatsApp/2.23.20.0
+ok	/	H:User-Agent=Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)
+ok	/	H:User-Agent=curl/8.5.0
+ok	/	H:User-Agent=PostmanRuntime/7.36.0
+ok	/	H:User-Agent=python-requests/2.31.0
+ok	/health	H:User-Agent=kube-probe/1.28
+ok	/	H:User-Agent=Mozilla/5.0 (X11; Linux x86_64; rv:122.0) Gecko/20100101 Firefox/122.0
+ok	/ping	H:User-Agent=UptimeRobot/2.0; http://www.uptimerobot.com/
+ok	/	H:User-Agent=Mozilla/5.0 (compatible; AhrefsBot/7.0; +http://ahrefs.com/robot/)
+#
+# ============ NORMAL COOKIES / AUTH HEADERS ============
+ok	/dashboard	H:Cookie=session_id=a1b2c3d4e5f6; csrftoken=xyz789; theme=dark
+ok	/account	H:Cookie=_ga=GA1.2.123.456; _gid=GA1.2.789; sidebar=collapsed
+ok	/api/me	H:Authorization=Bearer eyJhbGciOiJIUzI1NiJ9.eyJ1c2VyIjoiYSJ9.sig
+ok	/api/data	H:Authorization=Basic dXNlcjpwYXNzd29yZA==
+ok	/api/v1/x	H:X-Api-Key=example-api-key-0123456789
+ok	/app	H:Cookie=lang=en-US; currency=USD; cart_items=3
+ok	/checkout	H:Cookie=__stripe_mid=abc-123; __stripe_sid=def-456
+ok	/feed	H:Authorization=token example-token-0123456789abcdef
+#
+# ============ DEV-FORUM STYLE QUERIES (attack terms as plain words) ============
+ok	/forum/thread?title=preventing sql injection in prepared statements
+ok	/questions?q=how to sanitize user input against xss
+ok	/kb/article?slug=understanding-path-traversal-vulnerabilities
+ok	/blog?tag=log4shell&year=2021
+ok	/search?q=CVE-2021-44228 remediation guide
+ok	/docs?q=content security policy header examples
+ok	/wiki/Cross-site_scripting
+ok	/q?text=what is server side template injection
+ok	/help?q=my password contains special chars like %3C and %26
+ok	/search?q=difference between encoding and encryption
+#
+# ============ MISC LEGIT EDGE CASES ============
+ok	/products?color=red&size=M&sort=price&page=1
+ok	/users/@johndoe
+ok	/@acme-corp/dashboard
+ok	/tags/c%2B%2B
+ok	/tags/c%23
+ok	/search?q=f%23 functional programming
+ok	/calendar/2026/02
+ok	/invoice/INV-2026-0042/pdf
+ok	/maps?ll=40.7128,-74.0060&z=12
+ok	/weather?lat=51.5074&lon=-0.1278&units=metric
+ok	/convert?from=USD&to=EUR&amount=99.99
+ok	/i18n/messages.en-GB.json
+ok	/emoji/1f389.svg
+ok	/u/profile?name=D%27Angelo%20Russell
+ok	/book/To Kill a Mockingbird
+ok	/movie/wall-e-2008
+ok	/recipe/mac-%26-cheese
+ok	/github.com/anthropics/claude-code/issues/42
+ok	/ref?path=../components/Button (shared).tsx
+ok	/api/translate?text=Comment%20%C3%A7a%20va%3F&target=en
+ok	/notes?content=TODO: fix the && operator in the parser
+ok	/paste/abc123?lang=bash
+ok	/gist?code=echo%20%24HOME%20%26%26%20ls%20-la
+ok	/snippet?q=SELECT * FROM orders WHERE id = ?
+ok	/api/v1/sql-formatter	M=POST	H:Content-Type=application/json
+ok	/editor?doc=my document with <angle> brackets
+ok	/validate?email=test+tag@example.com
+ok	/cart/add?product_id=42&qty=2&options[color]=blue&options[size]=L
+ok	/analytics?event=page_view&props={"path":"/home","referrer":"google"}
+ok	/stream?range=bytes=0-1023	H:Range=bytes=0-1023
+# ============ ADDITIONAL BENIGN EDGE CASES ============
+ok	/search?q=learning rust: ownership && borrowing
+ok	/search?q=bash ${var:-default} parameter expansion
+ok	/search?q=what is the ldap filter syntax (objectClass=*)
+ok	/search?q=http response splitting explained
+ok	/search?q=null byte %00 in c strings
+ok	/search?q=javascript void(0) meaning
+ok	/search?q=why use <!DOCTYPE html>
+ok	/search?q=xml entity &amp; escaping in feeds
+ok	/forum/post?title=Help: my query SELECT * FROM users WHERE name=? is slow
+ok	/api/v1/metrics?name=http_requests_total&step=60s&start=1736500000&end=1736503600
+ok	/grafana/api/dashboards/uid/abc123
+ok	/kibana/app/discover#/?_a=(query:(language:kuery,query:%27status:200%27))
+ok	/api/search?q=%40mentions+and+%23hashtags
+ok	/u/user%40example.com/avatar.png
+ok	/mail/thread?subject=RE%3A%20Fwd%3A%20meeting%20notes
+ok	/cal/event?start=2026-03-01T09%3A00%3A00Z&end=2026-03-01T10%3A00%3A00Z
+ok	/api/geo?bbox=-74.1,40.6,-73.9,40.8
+ok	/v1/files/file-abc123DEF456/content	H:Authorization=Bearer sk-proj-abcdefghij1234567890
+ok	/webhooks/stripe	M=POST	H:Stripe-Signature=t=1736500000,v1=abcdef1234567890
+ok	/api/v1/chat/completions	M=POST	H:Content-Type=application/json
+ok	/_matrix/client/r0/sync?since=s123_456&timeout=30000	H:Authorization=Bearer syt_abc
+ok	/pub/media/catalog/product/cache/1/image/500x500/img.jpg
+ok	/sitecore/shell/Applications/Dialogs/Default.aspx
+ok	/umbraco/surface/form/submit	M=POST
+ok	/ghost/api/content/posts/?key=abc123&limit=5
+ok	/strapi/api/articles?populate=*&sort=publishedAt:desc
+ok	/api/collections/posts/records?filter=(status=%27published%27)
+ok	/supabase/rest/v1/todos?select=*&user_id=eq.42	H:apikey=eyJhbGciOiJIUzI1NiJ9.eyJyb2xlIjoiYW5vbiJ9.x
+ok	/functions/v1/send-email	M=POST	H:Content-Type=application/json
+ok	/_vercel/insights/view
+ok	/cdn-cgi/rum
+ok	/__webpack_hmr
+ok	/.well-known/vercel/microfrontend-routing
+ok	/storybook/iframe.html?id=button--primary&viewMode=story
+ok	/swagger-ui/index.html
+ok	/api/openapi.json
+ok	/search?q=%22exact phrase match%22 with quotes
+ok	/translate?q=%C2%BFC%C3%B3mo%20est%C3%A1s%3F&source=es&target=en
+ok	/products?tags[]=sale&tags[]=new&tags[]=featured
+ok	/report.csv?cols=name,email,signup_date&format=csv
+ok	/admin/dashboard	H:Cookie=admin_session=valid123; remember_me=1

@@ -1,7 +1,7 @@
 {
   "name": "bulwark",
-  "version": "1.9.0",
-  "description": "Bulwark: a request shield for self-hosted gateways. An attack engine with 21 categories and 44 CVE exploits that sees through encodings, behaviour scoring, blocklists and bans on every request in microseconds; full request logs, waves, pattern graphs, an IP Inspector and vendor reporting in its own dashboard; email alerts through the selfmail addon.",
+  "version": "2.0.0",
+  "description": "Bulwark: a request shield for self-hosted gateways. An attack engine with 22 categories and 91 CVE exploits that reads every header and sees through encodings, behaviour scoring, blocklists and bans on every request in microseconds; full request logs, waves, pattern graphs, an IP Inspector and vendor reporting in its own dashboard; email alerts through the selfmail addon.",
   "license": "MIT",
   "type": "module",
   "author": "Alexd Aero",

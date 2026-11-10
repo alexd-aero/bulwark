@@ -1,0 +1,332 @@
+# Ordinary traffic the engine must let through. Same format as attacks.tsv.
+#   ok    nothing at all (no hit worth points)
+#   ~ok   may be labelled or flagged as a probe, but never a payload
+ok	/
+ok	/search?q=O'Reilly books
+ok	/search?q=rock 'n' roll
+ok	/search?q=how to use SELECT in SQL
+ok	/search?q=trade union select committee
+ok	/search?q=C# vs C++
+ok	/search?q=50% off
+ok	/search?q=a+b=c
+ok	/search?q="exact phrase"
+ok	/search?q=-exclude +include
+ok	/search?q=Tom & Jerry
+ok	/search?q=it's 5 o'clock
+ok	/search?q=don't stop me now
+ok	/search?q=email@example.com
+ok	/search?q=(cats OR dogs) AND pets
+ok	/search?q="cats" OR "dogs"
+ok	/search?q=title:(foo OR bar) AND year:[2000 TO 2020]
+ok	/search?q=you or me
+ok	/search?q=1 or 2 apples
+ok	/search?q=yes or no
+ok	/search?q=5' 11" tall
+ok	/search?name=D'Angelo&city=Coeur d'Alene
+ok	/calc?expr=2*(3+4)/5
+ok	/calc?q=x^2+y^2=1
+ok	/login?next=/dashboard
+ok	/login?redirect=%2Fdashboard%3Ftab%3D1
+ok	/auth/callback?code=4/0AY0e-g7abc&state=xyz123&scope=email%20profile
+ok	/oauth/authorize?response_type=code&client_id=abc&redirect_uri=https%3A%2F%2Fapp.example.com%2Fcallback&scope=openid%20profile%20email&state=xyz
+ok	/out?url=https://www.google.com/search?q=test
+ok	/share?u=https%3A%2F%2Fexample.com%2Fa%3Fb%3Dc%26d%3De&title=Hello%20World
+ok	/verify?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U
+ok	/img?d=iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==
+ok	/api?filter={"name":"john","age":{"gt":5}}
+ok	/api?q={"where":{"id":1},"include":["author"]}
+ok	/graphql?query={user(id:1){name,email}}
+ok	/graphql?query=query%20GetUser(%24id%3AID!)%7Buser(id%3A%24id)%7Bname%7D%7D&variables=%7B%22id%22%3A%221%22%7D
+ok	/?utm_source=newsletter&utm_medium=email&utm_campaign=fall_sale&fbclid=IwAR3abc
+ok	/?gclid=Cj0KCQjw-abc_DEF
+ok	/blog/2024/01/my-first-post
+ok	/static/js/main.4f3b2a1c.js
+ok	/static/css/main.82ab3c.css
+ok	/assets/index-DkJ3h2Yx.js
+ok	/_next/static/chunks/pages/_app-0a1b2c3d4e.js
+ok	/_next/image?url=%2Fimages%2Fhero.png&w=1080&q=75
+ok	/_next/image?url=https%3A%2F%2Fcdn.example.com%2Fa.png&w=64&q=75
+ok	/_next/data/build123/index.json
+ok	/socket.io/?EIO=4&transport=polling&t=OabcXYZ
+ok	/socket.io/?EIO=4&transport=websocket&sid=abcDEF123_-
+ok	/api/search?query=price<100&sort=-date
+ok	/calc?q=1;2;3
+ok	/s?q=how to use wget
+ok	/s?q=rm -rf explained
+ok	/s?q=cat pictures
+ok	/s?q=echo chamber
+ok	/files/My%20Document%20(1).pdf
+ok	/files/r%C3%A9sum%C3%A9.pdf
+ok	/%E6%97%A5%E6%9C%AC%E8%AA%9E/%E3%83%9A%E3%83%BC%E3%82%B8
+ok	/search?q=%E4%B8%AD%E6%96%87
+ok	/u/john.doe
+ok	/@user/post-slug-123
+ok	/~user/index.html
+ok	/p/8492627/ODQ5MjYyNy5hbGV4LjE3OTQyNjgyMTI3OTc.B6lNtB1O7-9i99UsRYpqUPYMe9CCzdMD/
+ok	/?s=search+term
+ok	/api/users?filter[name]=john&filter[age][gt]=5
+ok	/api?where[status]=active&include=author,comments
+ok	/products?sort=price&order=desc
+ok	/products?order=price desc
+ok	/products?sort=name,-date
+ok	/report?from=2024-01-01&to=2024-12-31
+ok	/x?callback=jQuery1123_4567890
+ok	/saml/acs?SAMLResponse=PHNhbWxwOlJlc3BvbnNlIHhtbG5zOnNhbWxwPSJ1cm46b2FzaXM6bmFtZXM6dGM6U0FNTDoyLjA6cHJvdG9jb2wiPjwvc2FtbHA6UmVzcG9uc2U%2B
+ok	/proxy?url=https://api.github.com/repos/x/y
+ok	/notes?text=I <3 cats & dogs
+ok	/chat?msg=lol :) <- me
+ok	/s?q=c:\users\me\documents
+ok	/s?q=$100 or less
+ok	/s?q=${name} in templates
+ok	/s?q={{ title }} jinja
+ok	/api/math?expr=7*7
+ok	/s?q=hello world&lang=en-US&tz=America/New_York
+ok	/s?q=import os python
+ok	/s?q=java.lang.String docs
+ok	/robots.txt
+ok	/sitemap.xml
+ok	/favicon.ico
+ok	/manifest.json
+ok	/manifest.webmanifest
+ok	/sw.js
+ok	/ads.txt
+ok	/humans.txt
+ok	/browserconfig.xml
+ok	/apple-touch-icon.png
+ok	/apple-touch-icon-precomposed.png
+ok	/.well-known/acme-challenge/abcDEF123-_xyz
+ok	/.well-known/openid-configuration
+ok	/.well-known/security.txt
+ok	/.well-known/assetlinks.json
+ok	/.well-known/apple-app-site-association
+ok	/.well-known/change-password
+ok	/.well-known/nodeinfo
+ok	/.well-known/webfinger?resource=acct:user@example.com
+ok	/apple-app-site-association
+ok	/cdn-cgi/challenge-platform/scripts/jsd/main.js?ray=a55cd308f9495f2d
+ok	/cdn-cgi/rum?
+ok	/api/v1/me
+ok	/api/v2/items/123?fields=id,name,price&expand=owner
+ok	/v1.2/api/status
+ok	/downloads/file.tar.gz
+ok	/node_modules/.vite/deps/react.js?v=1a2b3c
+ok	/@vite/client
+ok	/@react-refresh
+ok	/src/main.tsx?t=1700000000000
+ok	/ws?cols=80&rows=24
+ok	/remote.php/dav/files/user/Documents/	M=PROPFIND
+ok	/api/items/5	M=DELETE
+ok	/api/items/5	M=PATCH
+ok	/api	M=OPTIONS
+ok	/api/upload	M=POST	H:Content-Type=multipart/form-data; boundary=----WebKitFormBoundary7MA4YWxkTrZu0gW
+ok	/api/data	M=POST	H:Content-Type=application/json; charset=utf-8	H:Content-Length=42
+ok	/api/stream	M=POST	H:Transfer-Encoding=chunked
+ok	/	H:Cookie=cart={"items":[1,2,3]}; theme=dark; _ga=GA1.2.123456789.1700000000
+ok	/	H:Cookie=session=eyJ1c2VyIjoiam9obiJ9.ZZZ.abc; csrftoken=abc123
+ok	/	H:Cookie=prefs=%7B%22lang%22%3A%22en%22%7D; consent=yes
+ok	/	H:Cookie=PHPSESSID=abc123def456; wordpress_logged_in_abc=user%7C1700000000%7Cabc
+ok	/	H:X-Forwarded-For=203.0.113.5, 198.51.100.7
+ok	/	H:Referer=https://www.google.com/search?q=it's+a+test&oq=it's
+ok	/	H:Referer=https://example.com/page?a=1&b=<b>bold</b>
+ok	/	H:User-Agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36
+ok	/	H:User-Agent=Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1
+ok	/	H:User-Agent=curl/8.5.0
+ok	/	H:User-Agent=Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)
+ok	/	H:User-Agent=Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)
+ok	/	H:User-Agent=facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)
+ok	/	H:User-Agent=Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)
+ok	/	H:User-Agent=WhatsApp/2.23.20.0
+ok	/	H:User-Agent=Mozilla/5.0+(compatible; UptimeRobot/2.0; http://www.uptimerobot.com/)
+ok	/	H:User-Agent=Go-http-client/2.0
+ok	/	H:Accept-Language=en-US,en;q=0.9	H:Accept=text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+ok	/	H:Sec-Ch-Ua="Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"
+ok	/	H:If-None-Match=W/"5e-abc"	H:Cache-Control=no-cache
+ok	/api	H:Authorization=Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc
+ok	/api	H:Authorization=Basic dXNlcjpwYXNz
+ok	/s?q=select a file from the menu
+ok	/s?q=drop shipping and delete account help
+ok	/s?q=update my profile
+ok	/s?q=sleep tips for babies
+ok	/s?q=benchmark results 2024
+ok	/s?q=user's guide (2nd edition)
+ok	/s?q=what's new?
+ok	/s?q=1+1=2
+ok	/s?q=x = y
+ok	/s?q=a || b
+ok	/s?q=AT&T
+ok	/s?q=R&D department
+ok	/s?q=size>10&color=red
+ok	/s?q=#hashtag
+ok	/s?q=50/50 chance
+~ok	/s?q=../ meaning
+ok	/s?q=from:me to:you
+ok	/s?q=-1
+ok	/s?q='
+ok	/s?q="
+ok	/s?q=it''s
+ok	/s?q=1' 
+ok	/s?name=Shaquille O'Neal
+ok	/s?name=O'Brien&team=Notre Dame
+ok	/s?q=and/or
+ok	/s?q=not null
+ok	/s?q=is null or empty
+ok	/s?q=group by month
+ok	/s?q=order by date
+ok	/s?q=union of sets
+ok	/s?q=$where to go
+ok	/s?q=[1,2,3]
+ok	/s?q={"a":1}
+ok	/s?q=<b>bold</b>
+ok	/s?q=<p>hello</p>
+ok	/s?q=x<y
+ok	/s?q=5 > 3
+ok	/s?q=onion=yes
+ok	/s?q=online=true
+ok	/s?q=mailto:me@example.com
+ok	/s?q=tel:+15551234567
+ok	/s?q=https://example.com/path?x=1
+ok	/s?q=ftp://ftp.example.com/pub/file.zip
+ok	/s?q=//comment
+ok	/s?q=/* note */
+ok	/s?q=-- signature
+ok	/s?q=what does chmod 755 mean
+ok	/s?q=python -c tutorial
+ok	/s?q=ping pong
+ok	/s?q=id card
+ok	/s?q=who am i
+ok	/s?q=user agent string
+ok	/s?q=alert banner design
+ok	/s?q=prompt engineering
+ok	/s?q=confirm order
+ok	/s?q=eval form
+ok	/s?q=system design interview
+ok	/s?q=exec summary
+ok	/s?q=passwd reset
+ok	/s?q=etc etc
+ok	/s?q=windows 11 tips
+ok	/s?q=proc sql
+ok	/s?q=localhost vs 127.0.0.1
+ok	/s?q=169.254.x.x address meaning
+ok	/s?url=https://news.example.com/article/123
+ok	/s?url=http://192.0.2.10/page
+ok	/s?redirect_uri=https://app.example.com/cb
+ok	/s?next=https://app.example.com/home
+ok	/s?return_to=/account/settings
+ok	/s?file=report.pdf
+ok	/s?file=2024/q1/report.pdf
+ok	/s?path=docs/getting-started
+ok	/s?page=about
+ok	/s?template=invoice
+ok	/s?lang=fr
+ok	/s?include=author
+ok	/s?cmd=next
+ok	/s?exec=true
+ok	/s?command=play
+ok	/s?ip=8.8.8.8
+ok	/s?host=example.com
+ok	/s?q=x&debug=1
+ok	/s?q=café
+ok	/s?q=naïve résumé
+ok	/s?q=Привет мир
+ok	/s?q=مرحبا
+ok	/s?q=😀 emoji
+ok	/s?q=fullwidth ＡＢＣ
+ok	/s?data=dGhpcyBpcyBhIHRlc3Q=
+ok	/s?sig=AbC123_-xyz
+ok	/s?id=550e8400-e29b-41d4-a716-446655440000
+ok	/s?hash=d41d8cd98f00b204e9800998ecf8427e
+ok	/s?ts=1700000000000
+ok	/s?ids[]=1&ids[]=2
+ok	/s?a[b][c]=d
+ok	/s?q=%25
+ok	/s?q=100%25 sure
+ok	/s?q=%
+ok	/s?q=a%2Bb
+ok	/s?text=if (a < b && c > d) { x = 1; }
+ok	/s?code=function(){return 1}
+ok	/s?code=print("hello")
+ok	/s?q=SELECT * FROM table
+ok	/s?q=what is a union select
+ok	/s?q=1=1
+ok	/s?q=user@domain
+ok	/s?q=java script tutorial
+ok	/s?q=javascript basics
+ok	/s?q=script writing
+ok	/s?q=svg icons
+ok	/s?q=iframe embed youtube
+ok	/s?q=onload event
+ok	/s?q=document.cookie explained
+ok	/s?q=window.location
+~ok	/s?q=sleep(5)?
+ok	/s?q=wordpress hosting
+ok	/s?q=.env files explained
+ok	/s?q=git config
+ok	/s?q=etc/passwd format
+ok	/s?q=jndi lookup
+ok	/s?q=log4j vulnerability
+ok	/s?q=sql injection prevention
+ok	/s?q=xss
+ok	/s?q=phpmyadmin tutorial
+ok	/docs/sql-injection
+ok	/blog/what-is-xss
+ok	/blog/how-to-secure-your-env-file
+ok	/admin
+ok	/admin/
+ok	/admin/login
+ok	/dashboard
+ok	/login
+ok	/signin
+ok	/account/settings
+ok	/api/auth/session
+ok	/api/health
+ok	/healthz
+ok	/status
+ok	/ping
+ok	/version.json
+ok	/feed.xml
+ok	/rss
+ok	/index.html
+ok	/home.html
+ok	/about-us
+ok	/contact
+ok	/en/products/widget-pro-2000
+ok	/shop/cart?add=123&qty=2
+ok	/checkout/success?order=AB-1234
+ok	/images/2024/photo_001.JPG
+ok	/media/video.mp4
+ok	/fonts/inter-var.woff2
+ok	/uploads/avatar/123.png
+ok	/files/readme.txt
+ok	/files/notes.md
+ok	/download/setup.exe
+ok	/download/app.dmg
+ok	/watch?v=dQw4w9WgXcQ
+ok	/maps?ll=40.7128,-74.0060&z=12
+ok	/s?q=lat:40.7 lon:-74.0
+ok	/s?q=a:b:c
+ok	/s?q=key=value;other=thing
+ok	/s?q=x;y
+ok	/s?q=one; two; three
+ok	/s?q=list | sort
+ok	/s?q=A|B testing
+ok	/s?q=`code`
+ok	/s?q=what does && do in bash
+ok	/s?q=semicolon; usage
+~ok	/wp-admin/admin-ajax.php?action=heartbeat
+~ok	/wp-login.php
+~ok	/xmlrpc.php
+~ok	/wp-content/uploads/2024/01/image.jpg
+~ok	/index.php?page=home
+~ok	/cgi-bin/printenv
+~ok	/phpmyadmin/
+~ok	/owa/
+~ok	/config.json
+~ok	/package.json
+~ok	/.gitignore
+~ok	/metrics
+~ok	/env.js
+~ok	/	M=PROPFIND
+~ok	/	H:User-Agent=python-requests/2.31.0
+~ok	/	H:User-Agent=okhttp/4.12.0
+~ok	/	H:User-Agent=
+~ok	/	H:User-Agent=Mozilla/5.0 (X11; Linux x86_64) HeadlessChrome/120.0.0.0 Safari/537.36

@@ -38,7 +38,7 @@ import { paths } from "./config.mjs";
 
 const MIN = 60e3, HOUR = 60 * MIN, DAY = 24 * HOUR;
 export const CLEARED_FOR = 7 * DAY;     // a clean scan lets an address into public tunnels for this long (the guard keeps the same)
-export const DEFAULT_SETTINGS = { auto: true, drop: true, lookups: true, scanFirst: true, report: true, abuseipdbKey: "", ntfy: "", webhook: "", keepDays: 30, strict: true, hostNotices: true, ...MAIL_DEFAULTS };
+export const DEFAULT_SETTINGS = { auto: true, drop: true, lookups: true, scanFirst: true, report: true, abuseipdbKey: "", blocklistdeEmail: "", blocklistdeKey: "", ntfy: "", webhook: "", keepDays: 30, strict: true, hostNotices: true, ...MAIL_DEFAULTS };
 // what the engine found, on a log line (as the guard writes it)
 function label(e, sig) {
   e.sig = sig.id; e.sc = sig.score;
@@ -198,6 +198,7 @@ export class Brain {
         if (m.legacy && !this.state.imported) this.importLegacy(m.legacy);
         break;
       case "ev":
+        if (!this.state.liveSince && m.list?.length) { this.state.liveSince = this.firstLogged() || Math.min(...m.list.map((e) => e.t || Date.now())); this.dirty = true; }
         for (const e of m.list || []) { try { this.ingest(e); } catch (err) { this.log("ingest:", err.message); this.fault("ingest", err.message); } }
         if (m.dropped) this.log(`a guard dropped ${m.dropped} log lines while the app was away`);
         break;
@@ -230,14 +231,17 @@ export class Brain {
   //        audit: [{t (ISO), event, ip, host, ua, path?}]}
   // Everything new comes into the log (src "aegis") and the profiles; whoever sent
   // payloads is judged by the guard's rules (two payloads, or score 6), then looked up.
+  // since when the guard itself logs every request (the gate's history only fills in before that)
+  firstLogged() { try { const d = this.logs.days()[0]; return d ? Date.parse(`${d}T00:00:00Z`) : 0; } catch { return 0; } }
   importHistory(data, host = "host") {
     const H = this.state.history ||= { seen: [], last: null };
+    const live = this.state.liveSince || this.firstLogged() || Infinity;
     const seen = new Set(H.seen);
     const fresh = [], per = new Map(), clientsSeen = new Set();
     const add = (k, e) => { if (seen.has(k)) return; seen.add(k); H.seen.push(k); fresh.push(e); };
     for (const t of data.tunnels || []) {
       for (const r of t.recent || []) {
-        if (!r?.ip || !r.t) continue;
+        if (!r?.ip || !r.t || r.t >= live) continue;             // the guard logged it already
         add(`r|${t.port}|${r.t}|${r.ip}|${r.method}|${r.path}`, { t: r.t, ip: normIp(r.ip), cc: r.country || "", host: t.host || "", port: t.port, main: false,
           m: r.method || "", path: String(r.path || "").slice(0, 600), ua: "", st: r.status || 0, b: r.bytes || 0, ms: r.ms ?? null, dec: "seen", src: host });
       }
@@ -400,9 +404,9 @@ export class Brain {
   }
   enqueue(ip, { probe }) {
     if (!this.due(ip, probe)) return;
+    if (this.queue.length > 1000) return;                 // full (a wave): not marked, so it is asked again next time
     this.queued.set(ip, { at: Date.now(), probe: !!probe });
     if (this.queued.size > 50000) this.queued.delete(this.queued.keys().next().value);
-    if (this.queue.length > 1000) return;
     this.queue.push({ ip, probe });
     this.pump();
   }
@@ -543,8 +547,11 @@ export class Brain {
   // ------------------------------------------------------------ waves
   tick() {
     this.waves.tick(this.series.lastMinutes(90));
-    const want = this.settings.strict && this.waves.critical() ? Date.now() + 30 * MIN : 0;
-    if (want && want - this.strictUntil > 5 * MIN || (!want && this.strictUntil > Date.now() && !this.waves.critical())) {
+    // on while a critical wave lasts and 30 minutes after; off at once when you turn the setting off
+    let want = this.strictUntil;
+    if (!this.settings.strict) want = 0;
+    else if (this.waves.critical() && Date.now() + 30 * MIN - this.strictUntil > 5 * MIN) want = Date.now() + 30 * MIN;
+    if (want !== this.strictUntil) {
       const was = this.strictUntil > Date.now();
       this.strictUntil = want;
       this.broadcast({ t: "strict", until: want });
@@ -698,12 +705,14 @@ export class Brain {
     const v = [...this.lat].sort((a, b) => a - b), at = (q) => v[Math.min(v.length - 1, Math.floor(q * v.length))];
     return v.length ? { n: v.length, p50: at(0.5), p95: at(0.95), max: v[v.length - 1] } : null;
   }
+  // a vendor was set up: what waited goes out, with this week's bans it never heard of
+  resumeReports() { return this.reporters.resume(Object.entries(this.state.bans).map(([ip, b]) => ({ ip, ...b }))); }
   bansList() {
-    const now = Date.now();
+    const now = Date.now(), waiting = new Set(this.reporters.state.waiting.map((w) => w.ip));
     return Object.entries(this.state.bans).filter(([, b]) => !b.until || b.until > now).map(([ip, b]) => {
       const p = this.profiles.get(ip), a = p?.asn ? null : this.asn.lookup(ip);
       return { ip, ...b, org: p?.org || a?.name || "", asn: p?.asn || a?.asn || null, dc: p ? !!p.dc : !!a?.hosting, country: b.country || p?.cc || a?.cc || "",
-               n: p?.n || 0, reported: this.reporters.state.reported[ip] || null };
+               n: p?.n || 0, reported: this.reporters.state.reported[ip] || null, waiting: waiting.has(ip) };
     }).sort((a, b) => (b.last || b.at) - (a.last || a.at));
   }
 }

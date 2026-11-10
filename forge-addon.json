@@ -2,8 +2,8 @@
   "spec": 1,
   "id": "bulwark",
   "name": "Bulwark",
-  "version": "1.9.0",
-  "description": "A shield for everything you publish. Every request is decoded and judged in microseconds by an attack engine with 21 categories and 44 known CVE exploits, scored CRS-style with per-address behaviour, and checked against 250k+ blocklisted addresses; attackers are banned on every tunnel at once. Its own dashboard shows every request in full, warns about waves, graphs the patterns, inspects any IP across a dozen free sources and reports attackers to the vendors that missed them. With the selfmail addon, it emails you about waves too.",
+  "version": "2.0.0",
+  "description": "A shield for everything you publish. Every request is decoded and judged in microseconds by an attack engine with 22 categories and 91 known CVE exploits that reads every header, scored CRS-style with per-address behaviour, and checked against 250k+ blocklisted addresses; attackers are banned on every tunnel at once. Its own dashboard shows every request in full, warns about waves, graphs the patterns, inspects any IP across a dozen free sources and reports attackers to the vendors that missed them. With the selfmail addon, it emails you about waves too.",
   "author": "Alexd Aero",
   "license": "MIT",
   "homepage": "https://github.com/alexd-aero/bulwark",
@@ -12,15 +12,15 @@
     "theme": "red",
     "icon": "shield",
     "style": "glow",
-    "badge": "OPEN TUNNELS",
+    "badge": "NEW ENGINE",
     "title": "{name} {version}",
-    "tagline": "A public tunnel can stop checking visitors' addresses, and still stop attacks and scanners by what they send.",
+    "tagline": "A new attack engine: catches 90% of attacks it was never tuned for (1.9: 67%), nearly twice as fast, drops no ordinary traffic.",
     "highlights": [
-      "Turn off Check visitors' addresses on one tunnel: no lists, no checking page, no flagged addresses",
-      "Shared school or office addresses get in, even if someone else got them listed",
-      "Payloads and attack tools are still dropped, and known scanners are turned away on those tunnels",
-      "Your own bans still hold there, and bans earned by what an address sent hold for an hour",
-      "Every other tunnel works exactly as before"
+      "Reads headers too: smuggling, Log4Shell, cookies, Next.js bypass, default passwords",
+      "SSRF in every spelling, NoSQL/LDAP, code in 5 languages, obfuscated shell, open redirects",
+      "Secret hunts for AI-agent configs, cloud keys and CI files; 91 CVE exploits, up from 44",
+      "A clearer IP Inspector: who says what, at a glance",
+      "Vendor reports work: blocklist.de too, and nothing is lost before you add a key"
     ],
     "button": "Update to {version}",
     "notes": "https://github.com/alexd-aero/bulwark/commits/main"
