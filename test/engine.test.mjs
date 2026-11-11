@@ -150,6 +150,13 @@ test("protocol abuse: methods, proxy probes, CRLF, sizes", () => {
   assert.equal(c.id, "crlf-injection"); assert.equal(c.score, 3);
   assert.equal(inspect({ path: "/x?q=line1%0D%0Aline2" }).id, null, "a textarea sent by GET has newlines");
   assert.equal(inspect({ path: "/x?q=" + "a".repeat(5000) }).id, "oversized-url");
+  // a proxy's encoded address (Noxia: /<12 hex>/<base64url>) is long by design and harmless
+  const tok = (n) => Array.from({ length: n }, (_, i) => "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"[(i * 7919) % 64]).join("");
+  for (const n of [5000, 9000, 15000]) assert.equal(inspect({ path: `/860562e15a39/${tok(n)}` }).id, null, `a ${n}-char opaque link is clean`);
+  assert.equal(inspect({ path: `/860562e15a39/${tok(6000)}?v=2&t=abc` }).id, null, "with a short plain query too");
+  assert.equal(inspect({ path: `/860562e15a39/${tok(17000)}` }).id, "oversized-url", "past what servers take: still too big");
+  assert.equal(inspect({ path: `/a/${tok(5000)}%27` }).id, "oversized-url", "an escape makes it an ordinary long URL again");
+  assert.equal(inspect({ path: `/a/${tok(5000)}?q=${"x".repeat(1100)}` }).id, "oversized-url", "a long query isn't opaque");
   assert.equal(inspect({ path: "/x?" + Array.from({ length: 300 }, (_, i) => `p${i}=1`).join("&") }).id, "param-flood");
 });
 

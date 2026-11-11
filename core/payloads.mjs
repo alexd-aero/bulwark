@@ -406,7 +406,12 @@ function target(raw) {
     else out.push(hit("malformed-target", { why: "a target that isn't a path" }));
   }
   if (/[\r\n]/.test(n.path) || /[\r\n]\s*[\w-]{2,40}\s*:\s*\S/.test(n.query) || /%0d%0a\s*[\w-]{2,40}:/i.test(n.raw)) out.push(hit("crlf-injection", { sev: /[\r\n]\s*(set-cookie|location|content-(type|length)|transfer-encoding|x-[\w-]+)\s*:/i.test(`${n.path}\n${n.query}`) ? "critical" : "high" }));
-  if (n.raw.length > 8192) out.push(hit("oversized-url", { sev: "high" })); else if (n.raw.length > 4096) out.push(hit("oversized-url"));
+  // A long address that is one opaque token (Noxia's encoded links, signed links: letters, digits,
+  // - _ . ~ and slashes, no escapes, a short query at most) carries no payload: only its sheer size
+  // counts, past what web servers take anyway. Anything else stays held to 4 and 8 KB.
+  const opaqueUrl = /^\/[A-Za-z0-9._~\/-]+(?:\?[A-Za-z0-9._~=&\/-]{0,1024})?$/.test(n.raw);
+  if (opaqueUrl ? n.raw.length > 16384 : n.raw.length > 8192) out.push(hit("oversized-url", { sev: "high" }));
+  else if (!opaqueUrl && n.raw.length > 4096) out.push(hit("oversized-url"));
   if (n.nparams > 200) out.push(hit("param-flood"));
   if (n.flags.overlong) out.push(hit("overlong-utf8"));
   if (n.flags.nul) out.push(hit("null-byte"));
