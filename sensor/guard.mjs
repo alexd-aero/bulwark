@@ -202,11 +202,16 @@ export class Guard {
       if (v?.bad) marks.push(...v.why.slice(0, 2));
       const strict = sig.score === 3 && now < this.strictUntil;
       const stuffing = extra?.find((h) => h.id === "brute-force" && h.sev === "critical");
-      if (marks.length || sc.score >= BAN_AT || strict || stuffing) {
+      // a listing or a bad lookup turns one hit into a ban only on a hosting address. Home,
+      // school and mobile addresses are shared (one NAT, hundreds of people, and DroneBL lists
+      // such networks for one infected laptop): there the request is stopped, and a ban takes
+      // the address's own score.
+      const listedBans = marks.length > 0 && v?.dc !== false;         // dc: the app's network lookup (unknown: as before)
+      if (listedBans || sc.score >= BAN_AT || strict || stuffing) {
         const what = sig.cat ? ` [${sig.cat}${sig.cve ? ` ${sig.cve}` : ""}]` : "";
         const why = stuffing ? `${stuffing.why}${marks.length ? ` and ${marks.join(", ")}` : ""}`
           : strict ? `sent a payload (${sc.paths[0]})${what} during a wave`
-          : marks.length ? `${sig.score === 3 ? "sent payloads" : "probed"} (${sc.paths[0]})${what} and ${marks.join(", ")}`
+          : listedBans ? `${sig.score === 3 ? "sent payloads" : "probed"} (${sc.paths[0]})${what} and ${marks.join(", ")}`
           : sc.payloads >= 2 ? `sent ${sc.payloads} payloads (${sc.paths.slice(0, 2).join(", ")})${what}`
           : `scored ${sc.score} (${sc.paths.slice(0, 2).join(", ")})${what}`;
         return this.ban(ip, why, "payload", 30 * DAY, info, bw);

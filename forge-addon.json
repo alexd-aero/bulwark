@@ -2,7 +2,7 @@
   "spec": 1,
   "id": "bulwark",
   "name": "Bulwark",
-  "version": "2.0.3",
+  "version": "2.0.4",
   "description": "A shield for everything you publish. Every request is decoded and judged in microseconds by an attack engine with 22 categories and 91 known CVE exploits that reads every header, scored CRS-style with per-address behaviour, and checked against 250k+ blocklisted addresses; attackers are banned on every tunnel at once. Its own dashboard shows every request in full, warns about waves, graphs the patterns, inspects any IP across a dozen free sources and reports attackers to the vendors that missed them. With the selfmail addon, it emails you about waves too.",
   "author": "Alexd Aero",
   "license": "MIT",
@@ -14,12 +14,12 @@
     "style": "glow",
     "badge": "FIXES",
     "title": "{name} {version}",
-    "tagline": "Linked machines and long-lived connections no longer get banned, and the app can't freeze when it runs low on memory.",
+    "tagline": "People on school, home and mobile networks no longer get banned because someone else on their network is on a blocklist.",
     "highlights": [
-      "WebSocket reconnects in Aegis's history are no longer scored as probing",
-      "Can't stall when low on memory: it saves and restarts in seconds",
-      "bulwark status shows the app's own memory use",
-      "Still the 2.0 engine: 90% held-out detection, no ordinary traffic dropped"
+      "A listing plus one odd request bans only hosting addresses now",
+      "Shared networks: the request is stopped, a ban needs their own score",
+      "A file a parameter names (?path=/app/prod.env) isn't a .env hunt",
+      "Same detection on every attack sample; 395k real requests: 1 change"
     ],
     "button": "Update to {version}",
     "notes": "https://github.com/alexd-aero/bulwark/commits/main"

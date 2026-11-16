@@ -263,3 +263,25 @@ test("behaviour: a sweep through probes on an app that answers 200 to everything
   assert.equal(n?.status, 404, "the Next.js middleware bypass is dropped");
   assert.equal(g3.gate("203.0.113.81", { method: "GET", path: "/", ua: "Mozilla/5.0", headers: { cookie: "cart={\"items\":[1,2]}; _ga=GA1.2.3.4", "x-forwarded-for": "198.51.100.1, 203.0.113.2" } }), null, "ordinary headers pass");
 });
+
+test("a file a parameter names isn't a probe for it; real .env probes still are", () => {
+  // a web file browser (AX Files) asking about a file called robo.env
+  assert.equal(classifyRequest("/api/ws/8492627/fs/stat?path=%2Fconfig%2Fdata%2Frobo.env").id, null);
+  assert.equal(classifyRequest("/files?open=/home/bob/prod.env").id, null);
+  assert.equal(classifyRequest("/page?file=/var/www/html/.env").id, "env-file", "a .env dotfile through a parameter is still a hunt");
+  for (const p of ["/.env", "/app/.env.production", "/api/.env?x=1", "/x/robo.env"]) assert.equal(classifyRequest(p).id, "env-file", p);
+  assert.ok(classifyRequest("/view?file=../../.env").id, "traversal to a .env still counts");
+});
+
+test("a shared (home, school, mobile) address: a bad lookup plus one hit stops the request, never bans", () => {
+  const { g } = guard();
+  g.apply({ t: "settings", settings: { auto: true, drop: true } });
+  g.apply({ t: "verdict", ip: "203.0.113.40", v: { bad: true, benign: false, level: "malicious", why: ["dronebl: brute-force attacker"], dc: false } });
+  assert.equal(g.gate("203.0.113.40", { path: "/.git/config" }).status, 404, "the payload is dropped");
+  assert.equal(g.bans.has("203.0.113.40"), false, "but nobody behind the address is banned");
+  assert.equal(g.gate("203.0.113.40", { path: "/" }), null, "and the next normal request goes through");
+  assert.equal(g.gate("203.0.113.40", { path: "/.aws/credentials" }).status, 403, "its own second payload bans");
+  // the same on a hosting address bans on the first
+  g.apply({ t: "verdict", ip: "198.51.100.50", v: { bad: true, benign: false, level: "malicious", why: ["dronebl: brute-force attacker"], dc: true } });
+  assert.equal(g.gate("198.51.100.50", { path: "/.git/config" }).status, 403);
+});

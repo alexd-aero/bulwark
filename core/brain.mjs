@@ -161,7 +161,7 @@ export class Brain {
       cleared: Object.entries(this.state.cleared || {}).filter(([, t]) => now - t < CLEARED_FOR).slice(-30000),
       bans: Object.entries(this.state.bans).filter(([, b]) => !b.until || b.until > now).map(([ip, b]) => [ip, { reason: b.reason, until: b.until, source: b.source, at: b.at }]),
       allow: Object.keys(this.state.allow), trusted: Object.entries(this.state.trusted), own: [...this.own],
-      verdicts: [...this.verdicts].filter(([, v]) => v.bad || v.benign).slice(-20000).map(([ip, v]) => [ip, { bad: v.bad, benign: v.benign, level: v.level, why: v.why }]),
+      verdicts: [...this.verdicts].filter(([, v]) => v.bad || v.benign).slice(-20000).map(([ip, v]) => [ip, { bad: v.bad, benign: v.benign, level: v.level, why: v.why, dc: !!this.asn.lookup(ip)?.hosting }]),
       strictUntil: this.strictUntil,
     };
   }
@@ -429,7 +429,7 @@ export class Brain {
     if (!isIP(ip) || isPrivate(ip) || this.own.has(ip)) return;
     const v = this.verdicts.get(ip);
     if (v && Date.now() - v.at < CLEARED_FOR) {                  // already known: say it again
-      if (this.letIn(ip, v.bad)) this.clear(ip); else if (!this.state.bans[ip]) this.broadcast({ t: "verdict", ip, v: { bad: v.bad, benign: v.benign, level: v.level, why: v.why } });
+      if (this.letIn(ip, v.bad)) this.clear(ip); else if (!this.state.bans[ip]) this.broadcast({ t: "verdict", ip, v: { bad: v.bad, benign: v.benign, level: v.level, why: v.why, dc: !!this.asn.lookup(ip)?.hosting } });
       return;
     }
     if (this.offline && !this.remoteInjected) return;
@@ -441,17 +441,20 @@ export class Brain {
     this.pump();
   }
   // Public tunnels let it in: nothing against it, or only a listing elsewhere on
-  // a shared home or mobile address that has done nothing here.
-  letIn(ip, bad) { return !bad || (!this.asn.lookup(ip)?.hosting && !this.profiles.get(ip)?.seq?.length); }
+  // a shared home, school or mobile address. What it does here is the guard's
+  // job (payloads dropped, two of them ban); one odd request on a school's NAT
+  // must not lock out everyone behind it.
+  letIn(ip, bad) { return !bad || !this.asn.lookup(ip)?.hosting; }
   clear(ip) {
     (this.state.cleared ||= {})[ip] = Date.now(); this.dirty = true;
     this.broadcast({ t: "cleared", ip, at: this.state.cleared[ip] });
   }
   // A listing elsewhere (GreyNoise has seen it attack, DroneBL lists it) bans on
   // its own only a datacenter address: nobody browses from one. A home or mobile
-  // address is shared (carrier NAT: one infected phone lists thousands of
-  // people), so it is banned only for what it does here: a probe plus a bad
-  // lookup, or a payload (the guard). Known services: innocent.
+  // address is shared (carrier NAT, a school: one infected laptop lists
+  // thousands of people), so it is banned only for what it does here, by the
+  // guard's own score (two payloads), never by a listing plus one odd request.
+  // Known services: innocent.
   judge(ip, r) {
     if (!r?.verdict) return;
     this.state.stats.checked++; this.dirty = true;
@@ -461,9 +464,10 @@ export class Brain {
     const v = { at: Date.now(), level, why: r.verdict.why, bad, benign };          // the full lookup stays in intel's cache, not here: 50 000 of them is a lot of memory
     this.verdicts.set(ip, v);
     if (this.verdicts.size > 50000) this.verdicts.delete(this.verdicts.keys().next().value);
-    if (bad || benign) this.broadcast({ t: "verdict", ip, v: { bad, benign, level, why: v.why } });
     const p = this.profiles.get(ip);
     const dc = !!this.asn.lookup(ip)?.hosting;
+    // every verdict reaches the guard, clean ones too: whether the address is a hosting one (dc) decides how hard a listing counts there
+    this.broadcast({ t: "verdict", ip, v: { bad, benign, level, why: bad || benign ? v.why : [], dc } });
     if (this.letIn(ip, bad)) this.clear(ip);
     if (!this.settings.auto || this.state.allow[ip] || this.state.bans[ip] || this.isTrusted(ip) || this.own.has(ip) || benign) return;
     const hard = [];
@@ -471,7 +475,8 @@ export class Brain {
     if (src.dnsbl?.result?.dronebl?.listed) hard.push(`DroneBL: ${src.dnsbl.result.dronebl.why.join(", ")}`);
     if (!r.sources && level === "malicious") hard.push(...r.verdict.why.slice(0, 2));
     if (hard.length && dc) this.ban(ip, hard.join(", "), { source: "lookup", ttl: 7 * DAY });
-    else if (p?.seq?.length && (bad || hard.length || level === "notice")) this.ban(ip, `probed (${p.paths.find((x) => x) || "?"}) and ${r.verdict.why.slice(0, 2).join(", ")}`, { source: "payload", ttl: 30 * DAY });
+    // a probe plus a bad lookup: a ban for a hosting address only (a shared one is banned by the guard's own score)
+    else if (dc && p?.seq?.length && (bad || hard.length || level === "notice")) this.ban(ip, `probed (${p.paths.find((x) => x) || "?"}) and ${r.verdict.why.slice(0, 2).join(", ")}`, { source: "payload", ttl: 30 * DAY });
   }
 
   // ------------------------------------------------------------ bans

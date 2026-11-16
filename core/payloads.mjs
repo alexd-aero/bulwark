@@ -27,7 +27,7 @@ import { SEVERITY, DROP_AT, categoryById, sevPoints, sevRank } from "./taxonomy.
 
 // Raised whenever the signatures learn something: the app then reads its log
 // again with them (Brain.rescan), so what slipped past before is caught now.
-export const SIGNATURES_VERSION = 4;
+export const SIGNATURES_VERSION = 5;
 
 // in: where it is looked for. path: the path only (decoded, collapsed and as
 // sent); url: the path and the query; query: the query values only.
@@ -35,7 +35,8 @@ export const SIGNATURES_VERSION = 4;
 // address only when the answer says it isn't (4xx), never when the app served it.
 const S = (id, name, cat, sev, opts, ...res) => {
   if (!opts || opts instanceof RegExp) { if (opts) res.unshift(opts); opts = {}; }
-  return { id, name, cat, sev, score: sev === "critical" ? 3 : 1, in: opts.in || "url", cve: opts.cve || null, probe: !!opts.probe, res };
+  // pathOnly: more patterns of the same signature, looked for in the path only
+  return { id, name, cat, sev, score: sev === "critical" ? 3 : 1, in: opts.in || "url", cve: opts.cve || null, probe: !!opts.probe, res, pathOnly: opts.pathOnly || [] };
 };
 const P = { in: "path" }, Q = { in: "query" };
 
@@ -143,7 +144,9 @@ export const SIGNATURES = [
   S("router", "router & IoT exploits", "iot", "critical", /\/(boaform|hnap1\/?.*soapaction|setup\.cgi|shell\?|tmunblock\.cgi|hndunblock\.cgi)/i, /\/cgi-bin\/.*(\.sh|bash|;)/i,
     /\/goform\//i, /\/(cgi-bin\/)?luci\/;stok=/i, /^\/stssys\.htm/i, /^\/ud\/act\?1\b/i, /\/cgi-bin\/nobody\/machine\.cgi/i, /^\/dvr\/cmd\b/i, /\/stalker_portal\//i, /\/(ctrlt|ud)\/deviceupgrade/i, /\/apply\.cgi/i, /\/cgi-bin\/(viewlog\.asp|mainfunction\.cgi|kerbynet|supervisor\/)/i),
   // ---- secrets & config ------------------------------------------------------------------------
-  S("env-file", ".env files", "secrets", "critical", /(^|\/)\.env[\w.~-]*$/i, /(^|\/)[\w-]+\.env(\.\w+)?$/i, /(^|\/)\.(envrc|flaskenv|secrets?)$/i, /(^|\/)_?environment$/i, /^\/@vite\/env\b/i),
+  // a named one (prod.env) counts only as the thing asked for (pathOnly): in a parameter it's a file
+  // browser or an editor naming a file (AX Files: ?path=/config/app/robo.env), not a hunt
+  S("env-file", ".env files", "secrets", "critical", { pathOnly: [/(^|\/)[\w-]+\.env(\.\w+)?$/i] }, /(^|\/)\.env[\w.~-]*$/i, /(^|\/)\.(envrc|flaskenv|secrets?)$/i, /(^|\/)_?environment$/i, /^\/@vite\/env\b/i),
   S("ai-agent", "AI coding-agent configs (API keys, MCP servers)", "secrets", "critical", /(^|\/)\.(claude|cursor|continue|codeium|windsurf|gemini|codex|roo|cline|aider[\w.-]*|copilot|openai|anthropic)(\/|\.(json|ya?ml|env)$|$)/i,
     /(^|\/)(\.?mcp|claude_desktop_config|cline_mcp_settings)\.json$/i, /(^|\/)(openai|anthropic|gemini)[\w-]*\.(env|json|key|txt)$/i),
   S("cloud-keys", "cloud service-account keys", "secrets", "critical", /(^|\/)(firebase[\w-]*adminsdk[\w-]*|serviceaccountkey|service[-_]account[\w-]*|application_default_credentials|google[-_]credentials|gcp[-_][\w-]+|client_secrets?[\w-]*|credentials|token|keyfile|aws|aws[-_]credentials|azure[-_]credentials)\.json$/i,
@@ -327,7 +330,10 @@ function group(list, where) {
   let g = groups.get(key);
   if (!g) {
     const pairs = [];
-    for (const s of list) if (s.in === where) for (const re of s.res) pairs.push([s, re]);
+    for (const s of list) {
+      if (s.in === where) for (const re of s.res) pairs.push([s, re]);
+      if (where === "path" && s.pathOnly) for (const re of s.pathOnly) pairs.push([s, re]);
+    }
     g = { pairs, m: new Matcher(pairs.map(([, re]) => re)) };
     groups.set(key, g);
   }

