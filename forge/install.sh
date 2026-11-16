@@ -25,8 +25,8 @@ ExecStart=$NODE $(node_flags) $APP/server.mjs
 Restart=always
 RestartSec=3
 Nice=5
-# whatever a wave does to it, it never takes the machine with it
-MemoryHigh=480M
+# whatever a wave does to it, it never takes the machine with it. No MemoryHigh:
+# throttled at it the app stalled for days; at MemoryMax it's stopped and restarted
 MemoryMax=640M
 CPUQuota=80%
 IOWeight=50

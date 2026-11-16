@@ -479,16 +479,18 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   memoryWatch(app);
 }
 
-// Near its memory ceiling the app doesn't crash: the kernel throttles it (the
-// unit's MemoryHigh) and it stalls for days, the dashboard and CLI timing out.
-// So it watches itself: two checks in a row close to the cgroup's MemoryHigh
-// (or V8's heap limit) and it saves everything and exits, and systemd starts it
-// again in seconds. The guard in the gate keeps enforcing meanwhile.
+// Near a MemoryHigh the kernel throttles the app instead of stopping it, and it
+// stalls for days (the dashboard and CLI time out), so the unit sets only
+// MemoryMax. And it watches itself: two checks in a row close to the cgroup's
+// limit (or V8's heap limit) and it saves everything and exits, and systemd
+// starts it again in seconds. The guard in the gate keeps enforcing meanwhile.
 export function memoryCeiling() {
   try {
     const cg = readFileSync("/proc/self/cgroup", "utf8").split("\n").find((l) => l.startsWith("0::"))?.slice(3);
-    const high = cg && readFileSync(join("/sys/fs/cgroup", cg, "memory.high"), "utf8").trim();
-    if (high && /^\d+$/.test(high)) return Number(high);
+    for (const f of ["memory.high", "memory.max"]) {
+      const v = cg && readFileSync(join("/sys/fs/cgroup", cg, f), "utf8").trim();
+      if (v && /^\d+$/.test(v)) return Number(v);
+    }
   } catch { /* no cgroup v2 limit */ }
   return 0;
 }
