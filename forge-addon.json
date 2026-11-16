@@ -2,7 +2,7 @@
   "spec": 1,
   "id": "bulwark",
   "name": "Bulwark",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "A shield for everything you publish. Every request is decoded and judged in microseconds by an attack engine with 22 categories and 91 known CVE exploits that reads every header, scored CRS-style with per-address behaviour, and checked against 250k+ blocklisted addresses; attackers are banned on every tunnel at once. Its own dashboard shows every request in full, warns about waves, graphs the patterns, inspects any IP across a dozen free sources and reports attackers to the vendors that missed them. With the selfmail addon, it emails you about waves too.",
   "author": "Alexd Aero",
   "license": "MIT",
@@ -12,15 +12,14 @@
     "theme": "red",
     "icon": "shield",
     "style": "glow",
-    "badge": "NEW ENGINE",
+    "badge": "FIXES",
     "title": "{name} {version}",
-    "tagline": "A new attack engine: catches 90% of attacks it was never tuned for (1.9: 67%), nearly twice as fast, drops no ordinary traffic.",
+    "tagline": "Linked machines and long-lived connections no longer get banned, and the app can't freeze when it runs low on memory.",
     "highlights": [
-      "Reads headers too: smuggling, Log4Shell, cookies, Next.js bypass, default passwords",
-      "SSRF in every spelling, NoSQL/LDAP, code in 5 languages, obfuscated shell, open redirects",
-      "Secret hunts for AI-agent configs, cloud keys and CI files; 91 CVE exploits, up from 44",
-      "A clearer IP Inspector: who says what, at a glance",
-      "Vendor reports work: blocklist.de too, and nothing is lost before you add a key"
+      "WebSocket reconnects in Aegis's history are no longer scored as probing",
+      "Near its memory ceiling the app saves and restarts in seconds instead of stalling",
+      "bulwark status shows the app's own memory use",
+      "Still the 2.0 engine: 90% held-out detection, no ordinary traffic dropped"
     ],
     "button": "Update to {version}",
     "notes": "https://github.com/alexd-aero/bulwark/commits/main"

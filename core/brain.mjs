@@ -242,8 +242,11 @@ export class Brain {
     for (const t of data.tunnels || []) {
       for (const r of t.recent || []) {
         if (!r?.ip || !r.t || r.t >= live) continue;             // the guard logged it already
+        // Burrow writes a WebSocket as method "WS": an upgraded GET, not an unknown method
+        // (a linked machine reconnecting every minute got banned as "probing")
+        const ws = r.method === "WS";
         add(`r|${t.port}|${r.t}|${r.ip}|${r.method}|${r.path}`, { t: r.t, ip: normIp(r.ip), cc: r.country || "", host: t.host || "", port: t.port, main: false,
-          m: r.method || "", path: String(r.path || "").slice(0, 600), ua: "", st: r.status || 0, b: r.bytes || 0, ms: r.ms ?? null, dec: "seen", src: host });
+          m: ws ? "GET" : r.method || "", ...(ws ? { ws: true } : {}), path: String(r.path || "").slice(0, 600), ua: "", st: r.status || 0, b: r.bytes || 0, ms: r.ms ?? null, dec: "seen", src: host });
       }
       for (const c of t.clients || []) {
         if (!c?.ip) continue;

@@ -22,6 +22,7 @@ import { createServer as createNetServer } from "node:net";
 import { readFileSync, existsSync, unlinkSync, chmodSync } from "node:fs";
 import { join, extname, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import v8 from "node:v8";
 import { timingSafeEqual, createHash } from "node:crypto";
 import { loadConfig } from "./core/config.mjs";
 import { Brain, DEFAULT_SETTINGS } from "./core/brain.mjs";
@@ -287,7 +288,11 @@ export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", 
   async function api(req, res, path, url) {
     const q = Object.fromEntries(url.searchParams);
     const m = req.method;
-    if (path === "/status") return send(res, 200, { ok: true, name: "Bulwark", version: VERSION, sensors: brain.sensors.size, bans: brain.bansList().length });
+    if (path === "/status") {
+      const mem = process.memoryUsage(), mb = (n) => Math.round(n / 1048576);
+      return send(res, 200, { ok: true, name: "Bulwark", version: VERSION, sensors: brain.sensors.size, bans: brain.bansList().length,
+        memory: { rssMb: mb(mem.rss), heapMb: mb(mem.heapUsed), heapMaxMb: mb(v8.getHeapStatistics().heap_size_limit), ceilingMb: mb(memoryCeiling()) || null, upSec: Math.round(process.uptime()) } });
+    }
     if (path === "/overview" && m === "GET") {
       const span = SPANS[q.span] || DAY, since = Date.now() - span, sum = brain.series.total(span);
       return send(res, 200, {
@@ -471,4 +476,37 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const cfg = loadConfig({ create: true });
   const app = startApp({ home: cfg.home, port: cfg.port, bind: cfg.bind, key: cfg.key, access: cfg.access, dashboard: cfg.dashboard, offline: process.env.BULWARK_OFFLINE === "1" });
   for (const sig of ["SIGTERM", "SIGINT"]) process.on(sig, () => { app.close(); process.exit(0); });
+  memoryWatch(app);
+}
+
+// Near its memory ceiling the app doesn't crash: the kernel throttles it (the
+// unit's MemoryHigh) and it stalls for days, the dashboard and CLI timing out.
+// So it watches itself: two checks in a row close to the cgroup's MemoryHigh
+// (or V8's heap limit) and it saves everything and exits, and systemd starts it
+// again in seconds. The guard in the gate keeps enforcing meanwhile.
+export function memoryCeiling() {
+  try {
+    const cg = readFileSync("/proc/self/cgroup", "utf8").split("\n").find((l) => l.startsWith("0::"))?.slice(3);
+    const high = cg && readFileSync(join("/sys/fs/cgroup", cg, "memory.high"), "utf8").trim();
+    if (high && /^\d+$/.test(high)) return Number(high);
+  } catch { /* no cgroup v2 limit */ }
+  return 0;
+}
+function memoryWatch(app, { every = 30e3, share = 0.9 } = {}) {
+  const ceiling = memoryCeiling(), heapMax = v8.getHeapStatistics().heap_size_limit;
+  let strikes = 0;
+  const x = setInterval(() => {
+    const m = process.memoryUsage();
+    const over = (ceiling && m.rss > ceiling * share) || m.heapUsed > heapMax * share;
+    strikes = over ? strikes + 1 : 0;
+    if (strikes < 2) return;
+    const mb = (n) => Math.round(n / 1048576);
+    const why = `memory ${mb(m.rss)} MB (heap ${mb(m.heapUsed)} of ${mb(heapMax)} MB${ceiling ? `, ceiling ${mb(ceiling)} MB` : ""}): saving and restarting`;
+    console.log(new Date().toISOString(), why);
+    try { app.brain.log(why); app.brain.fault("memory", why); } catch { /* still exit */ }
+    clearInterval(x);
+    app.close();
+    process.exit(75);                                     // Restart=always brings it back
+  }, every);
+  x.unref?.();
 }

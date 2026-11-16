@@ -18,7 +18,9 @@ case "${1:-status}" in
       const t = d.totals || {}, a = d.alerts || [];
       console.log(`Bulwark ${d.version}: ${d.sensors.length} host(s) guarded, ${d.bans} banned, ${d.lists.total} addresses on ${d.lists.loaded} lists`);
       console.log(`last 24 h: ${t.req || 0} requests, ${(t.drop || 0) + (t.block || 0) + (t.ban || 0)} stopped, ${t.newIp || 0} new addresses`);
-      for (const x of a) console.log(`  [${x.sev}] ${x.title}`);' ;;
+      for (const x of a) console.log(`  [${x.sev}] ${x.title}`);'
+    call GET "/status" | show '
+      const m = d.memory; if (m) console.log(`app memory: ${m.rssMb} MB (heap ${m.heapMb} of ${m.heapMaxMb} MB${m.ceilingMb ? `, restarts itself near ${Math.round(m.ceilingMb * 0.9)} MB` : ""}), up ${Math.round(m.upSec / 3600)} h`);' ;;
   url) echo "http://127.0.0.1:$PORT/?k=$KEY" ;;
   key) echo "$KEY" ;;
   ban) [ -n "${2:-}" ] || { echo "bulwark ban IP [why]"; exit 1; }

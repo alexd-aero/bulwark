@@ -230,6 +230,18 @@ test("settings: the key is never shown; the guards get the switches", async () =
   assert.ok(got.some((m) => m.t === "settings" && m.settings.drop === false));
 });
 
+test("the host's past: a WebSocket that keeps reconnecting (Burrow writes it as WS) is not probing", async () => {
+  const t0 = Date.now() - 5 * 3600e3;
+  // a linked machine dialing a locked address every minute: 40 refused upgrades on one path
+  const recent = Array.from({ length: 40 }, (_, i) => ({ t: t0 + i * 60e3, ip: "198.51.100.77", country: "SA", method: "WS", path: "/m/link", status: 401, ms: 1, bytes: 0 }));
+  tell({ t: "history", host: "aegis-burrow", data: { tunnels: [{ port: 4610, host: "ws.tunnel.example", clients: [], recent }] } });
+  await until(() => app.brain.state.history?.last?.ips >= 1 && app.brain.state.history.last.rows >= 40);
+  assert.equal(app.brain.state.bans["198.51.100.77"], undefined, "reconnects are not an attack");
+  const rows = (await get("/api/logs?ip=198.51.100.77")).logs;
+  assert.ok(rows.length >= 40);
+  assert.ok(rows.every((e) => e.m === "GET" && e.ws === true && !e.sig), "logged as upgraded GETs, no pattern");
+});
+
 test("the host's past: Aegis's history comes in once, attackers in it are banned, the dashboard is told", async () => {
   const t0 = Date.now() - 6 * 3600e3;
   const data = {
