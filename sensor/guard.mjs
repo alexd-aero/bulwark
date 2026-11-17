@@ -34,6 +34,10 @@ import { inspect, verdictOf, signatureById } from "../core/payloads.mjs";
 
 const HOUR = 3600e3, DAY = 24 * HOUR;
 const OPEN_BAN_FOR = HOUR;
+// A ban earned by score alone (odd requests, probes) with no real attack payload lasts an hour:
+// enough to stop a scanner, and one person's odd traffic (a school or home network shares one
+// address among hundreds) doesn't lock everyone else out for a month. Payloads keep it 30 days.
+const scoreBanFor = (sc) => ((sc?.payloads || 0) >= 1 ? 30 * DAY : HOUR);
 export const CLEARED_FOR = 7 * DAY;          // a clean scan lets an address into public tunnels for this long
 const SCAN_ASK_EVERY = 10e3;
 export const BAN_AT = 10;                    // an address's points that ban it (two payloads)
@@ -180,7 +184,7 @@ export class Guard {
     if (strong.length && !trusted()) return this.ban(ip, `on ${strong.map((l) => l.name).join(", ")}`, "list", 7 * DAY, info, bw);
     if (!sig.id || sig.label) {                                       // a scanner's name only labels the request: it never adds up to a ban
       const due = this.scores.get(ip);                                // probes the app said weren't here may have tipped it over since
-      if (due?.due && now - due.last < DAY && (open || !this.verdicts.get(ip)?.benign) && !trusted()) { due.due = false; return this.ban(ip, `scored ${due.score} (${due.paths.slice(0, 2).join(", ")})`, "payload", 30 * DAY, info, bw); }
+      if (due?.due && now - due.last < DAY && (open || !this.verdicts.get(ip)?.benign) && !trusted()) { due.due = false; return this.ban(ip, `scored ${due.score} (${due.paths.slice(0, 2).join(", ")})`, "payload", scoreBanFor(due), info, bw); }
       return this.scanFirst(ip, info, bw, trusted);
     }
     if (trusted()) return null;
@@ -214,7 +218,7 @@ export class Guard {
           : listedBans ? `${sig.score === 3 ? "sent payloads" : "probed"} (${sc.paths[0]})${what} and ${marks.join(", ")}`
           : sc.payloads >= 2 ? `sent ${sc.payloads} payloads (${sc.paths.slice(0, 2).join(", ")})${what}`
           : `scored ${sc.score} (${sc.paths.slice(0, 2).join(", ")})${what}`;
-        return this.ban(ip, why, "payload", 30 * DAY, info, bw);
+        return this.ban(ip, why, "payload", listedBans || strict || stuffing ? 30 * DAY : scoreBanFor(sc), info, bw);
       }
     }
     if (sig.score === 3 && this.settings.drop) return this.drop(bw, "a payload: never reached the app");
