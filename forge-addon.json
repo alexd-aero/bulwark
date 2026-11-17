@@ -14,12 +14,12 @@
     "style": "glow",
     "badge": "FIXES",
     "title": "{name} {version}",
-    "tagline": "People on school, home and mobile networks no longer get banned because someone else on their network is on a blocklist.",
+    "tagline": "Schools and homes share one address: a ban earned by odd traffic alone now lasts an hour, not a month.",
     "highlights": [
-      "A listing plus one odd request bans only hosting addresses now",
-      "Shared networks: the request is stopped, a ban needs their own score",
-      "A file a parameter names (?path=/app/prod.env) isn't a .env hunt",
-      "Same detection on every attack sample; 395k real requests: 1 change"
+      "A ban from a score alone (no attack payload) lasts 1 hour",
+      "Real payloads and blocklisted attackers still get 30 days",
+      "Fixes a school address banned a month for Google Docs' long tracking URLs",
+      "Scanners are still stopped the moment they score"
     ],
     "button": "Update to {version}",
     "notes": "https://github.com/alexd-aero/bulwark/commits/main"
