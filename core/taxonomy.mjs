@@ -52,6 +52,8 @@ export const CATEGORIES = [
     about: "Requests shaped like a published exploit for a specific product (each tagged with its CVE)." }),
   C("webshell", "Web shells & backdoors", "web shell", "#e040fb", { mitre: ["T1505.003"], owasp: "A08", crs: "955 web shells", abuse: [AB.hacking, AB.exploited, AB.webapp],
     about: "Looking for shells someone else planted (alfa, wso, c99, b374k…) or talking to one." }),
+  C("auth", "Forged tokens & auth bypass", "forged token", "#a1887f", { mitre: ["T1606", "T1550.001"], owasp: "A07", crs: "—", abuse: [AB.hacking, AB.webapp],
+    about: "Getting in without a password: JWTs signed with alg none, a kid that names a file or runs a query, keys fetched from the attacker (jku, x5u) or carried inside the token (jwk), ECDSA signatures of zeros." }),
   C("bruteforce", "Brute force & credential stuffing", "brute force", "#f2b53c", { mitre: ["T1110", "T1110.001", "T1110.004"], owasp: "A07", crs: "—", abuse: [AB.brute, AB.webapp],
     about: "Admin panels and CMS logins asked for, and login endpoints hammered with guesses." }),
   C("protocol", "Protocol abuse & smuggling", "protocol", "#8bc34a", { mitre: ["T1190", "T1090"], owasp: "A05", crs: "920 / 921", abuse: [AB.hacking, AB.webapp],

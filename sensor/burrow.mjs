@@ -188,7 +188,8 @@ export function peek(ip) {
   const b = guardObj.bans.get(ip);
   return { banned: b && (!b.until || b.until > Date.now()) ? b : null, allowed: guardObj.allow.has(ip), trusted: guardObj.isTrusted(ip),
            own: guardObj.own.has(ip), lists: lookupIn(guardObj.lists, ip).map(({ id, name, strength }) => ({ id, name, strength })),
-           probes: guardObj.scores.get(ip)?.probes || 0, verdict: guardObj.verdicts.get(ip)?.level || null };
+           probes: guardObj.scores.get(ip)?.probes || 0, verdict: guardObj.verdicts.get(ip)?.level || null,
+           shared: guardObj.sharedSize(ip) || 0 };      // clients behind it (2 or more: judged client by client)
 }
 export function lookup(ip) { return guardObj ? lookupIn(guardObj.lists, ip) : []; }
 const appUrl = () => `http://${!cfg.bind || cfg.bind === "0.0.0.0" || cfg.bind === "::" ? "127.0.0.1" : cfg.bind}:${cfg.port}`;

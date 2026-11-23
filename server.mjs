@@ -103,6 +103,7 @@ export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", 
     const lists = brain.feeds.lookup(ip);
     return {
       ip, profile: p, devices: brain.devicesAt(ip), ban: brain.state.bans[ip] || null, allowed: brain.state.allow[ip] || null, trusted: brain.isTrusted(ip), own: brain.own.has(ip),
+      shared: brain.sharedOf(ip), clientBans: brain.clientBansOf(ip),
       asn: brain.asn.lookup(ip), net24: netOf(ip), net16: netOf(ip, true), lists, intel, verdict: brain.verdicts.get(ip) ? { ...brain.verdicts.get(ip), intel: undefined } : null,
       coverage: brain.reporters.coverage(ip, lists, intel.error ? null : intel),
       alerts: brain.waves.list(300).filter((a) => a.members?.includes(ip)).map(({ id, title, sev, kind, open, first, last }) => ({ id, title, sev, kind, open, first, last })),
@@ -414,6 +415,14 @@ export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", 
           b.mailTo = String(b.mailTo || "").trim();
           if (b.mailTo && !validAddress(b.mailTo)) return send(res, 400, { error: "That isn't an email address." });
         }
+        // shared networks (a school's or an office's range): addresses and networks, /8 or narrower
+        if ("sharedNets" in b) {
+          const toks = String(b.sharedNets || "").split(/[\s,;]+/).filter(Boolean);
+          const bad = toks.find((x) => { const [a, n] = x.split("/"), v = isIP(a); return !v || (n !== undefined && !(/^\d+$/.test(n) && Number(n) >= (v === 4 ? 8 : 32) && Number(n) <= (v === 4 ? 32 : 128))); });
+          if (bad) return send(res, 400, { error: `"${bad}" isn't an address or a network (like 203.0.113.0/24).` });
+          brain.state.settings.sharedNets = toks.join(" ").slice(0, 4000);
+          delete b.sharedNets;
+        }
         // the key is never shown back, so an empty field means "keep it"; null clears it
         for (const k of ["abuseipdbKey", "blocklistdeKey"]) {
           if (b[k] === "" || b[k] === undefined || /^•+/.test(b[k] || "")) delete b[k];
@@ -430,7 +439,7 @@ export function startApp({ home, port, bind = "127.0.0.1", key, access = "key", 
         // a vendor just set up (or reporting back on): what waited goes out now
         if (brain.reporters.ready().length > before || (!wasOn && brain.settings.report)) brain.resumeReports();
         brain.dirty = true; brain.save(true);
-        brain.broadcast({ t: "settings", settings: { auto: brain.settings.auto, drop: brain.settings.drop, lookups: brain.settings.lookups, scanFirst: brain.settings.scanFirst } });
+        brain.broadcast({ t: "settings", settings: brain.guardSettings() });
       }
       return send(res, 200, settingsView());
     }

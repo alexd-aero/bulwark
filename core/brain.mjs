@@ -17,6 +17,13 @@
 //                    bell), unless Settings says not to; and by email when the
 //                    selfmail addon is there and you turned it on (mail.mjs):
 //                    waves, campaigns, strict mode, the guard gone, the app failing
+//   shared addresses the guards judge an address that many people use (a school,
+//                    a home, a carrier's NAT) client by client: the addresses they
+//                    found shared and the clients they banned are kept here and
+//                    sent back to every guard, and nothing here bans a shared
+//                    address for what its clients did between them
+//   stuffing         a guard's credential-stuffing campaign (many addresses, few
+//                    passwords each, one sign-in page) becomes a wave
 //
 // Never banned: private addresses, addresses you signed in from (30 days),
 // requests with your session, the allow list. This machine's own public
@@ -26,7 +33,7 @@
 import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, copyFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { isIP, isPrivate, normIp } from "./net.mjs";
-import { Feeds, FEEDS } from "./lists.mjs";
+import { Feeds, FEEDS, RangeSet } from "./lists.mjs";
 import { Asn } from "./asn.mjs";
 import { Logs, Series, Profiles } from "./store.mjs";
 import { Waves } from "./waves.mjs";
@@ -38,7 +45,8 @@ import { paths } from "./config.mjs";
 
 const MIN = 60e3, HOUR = 60 * MIN, DAY = 24 * HOUR;
 export const CLEARED_FOR = 7 * DAY;     // a clean scan lets an address into public tunnels for this long (the guard keeps the same)
-export const DEFAULT_SETTINGS = { auto: true, drop: true, lookups: true, scanFirst: true, report: true, abuseipdbKey: "", blocklistdeEmail: "", blocklistdeKey: "", ntfy: "", webhook: "", keepDays: 30, strict: true, hostNotices: true, ...MAIL_DEFAULTS };
+export const SHARED_FOR = 30 * DAY;     // an address found shared is remembered this long
+export const DEFAULT_SETTINGS = { auto: true, drop: true, lookups: true, scanFirst: true, sharedNets: "", report: true, abuseipdbKey: "", blocklistdeEmail: "", blocklistdeKey: "", ntfy: "", webhook: "", keepDays: 30, strict: true, hostNotices: true, ...MAIL_DEFAULTS };
 // what the engine found, on a log line (as the guard writes it)
 function label(e, sig) {
   e.sig = sig.id; e.sc = sig.score;
@@ -148,20 +156,28 @@ export class Brain {
     for (const [ip, b] of Object.entries(this.state.bans)) if (b.until && b.until < now) delete this.state.bans[ip];
     for (const [ip, t] of Object.entries(this.state.trusted)) if (now - t > 30 * DAY) delete this.state.trusted[ip];
     for (const [ip, t] of Object.entries(this.state.cleared ||= {})) if (now - t > CLEARED_FOR) delete this.state.cleared[ip];
+    for (const [k, b] of Object.entries(this.state.clientBans ||= {})) if (b.until < now) delete this.state.clientBans[k];
+    for (const [ip, s] of Object.entries(this.state.shared ||= {})) if (now - s.at > SHARED_FOR) delete this.state.shared[ip];
     this.state.actions = this.state.actions.slice(0, 500);
     try { atomic(this.file, this.state); if (force) { this.snapAt = 0; clearTimeout(this.snapTimer); this.snapTimer = null; } this.writeSnapshot(); this.dirty = false; } catch (e) { this.log("save:", e.message); }
   }
   get settings() { return this.state.settings; }
 
   // ------------------------------------------------------------ guards
+  guardSettings() { return { auto: this.settings.auto, drop: this.settings.drop, lookups: this.settings.lookups, scanFirst: this.settings.scanFirst, sharedNets: this.settings.sharedNets || "" }; }
+  // a verdict as the guards get it: what the lookups said, and what kind of network it is
+  // (a hosting one: a listing there bans; a mobile carrier's: shared by many)
+  guardVerdict(ip, v) { const a = this.asn.lookup(ip); return { bad: v.bad, benign: v.benign, level: v.level, why: v.bad || v.benign ? v.why : [], dc: !!a?.hosting, mobile: !!a?.mobile }; }
   snapshot() {
     const now = Date.now();
     return {
-      settings: { auto: this.settings.auto, drop: this.settings.drop, lookups: this.settings.lookups, scanFirst: this.settings.scanFirst },
+      settings: this.guardSettings(),
       cleared: Object.entries(this.state.cleared || {}).filter(([, t]) => now - t < CLEARED_FOR).slice(-30000),
       bans: Object.entries(this.state.bans).filter(([, b]) => !b.until || b.until > now).map(([ip, b]) => [ip, { reason: b.reason, until: b.until, source: b.source, at: b.at }]),
       allow: Object.keys(this.state.allow), trusted: Object.entries(this.state.trusted), own: [...this.own],
-      verdicts: [...this.verdicts].filter(([, v]) => v.bad || v.benign).slice(-20000).map(([ip, v]) => [ip, { bad: v.bad, benign: v.benign, level: v.level, why: v.why, dc: !!this.asn.lookup(ip)?.hosting }]),
+      verdicts: [...this.verdicts].filter(([, v]) => v.bad || v.benign || v.mobile).slice(-20000).map(([ip, v]) => [ip, this.guardVerdict(ip, v)]),
+      clientBans: Object.entries(this.state.clientBans || {}).filter(([, b]) => b.until > now).slice(-5000).map(([k, b]) => [k, { reason: b.reason, until: b.until, source: b.source, at: b.at, ip: b.ip, n: b.n }]),
+      shared: Object.entries(this.state.shared || {}).filter(([, s]) => now - s.at < SHARED_FOR).slice(-5000),
       strictUntil: this.strictUntil,
     };
   }
@@ -207,7 +223,73 @@ export class Brain {
       case "history": try { this.importHistory(m.data || {}, m.host); } catch (err) { this.log("history:", err.message); this.fault("history", err.message); } break;
       case "devices": this.useDevices(m); break;
       case "scan": this.scanNow(m.ip); break;
+      case "clientban": this.recordClientBan(m.ip, m.key, m.b, m.info || {}); break;
+      case "clientunban": if (this.state.clientBans?.[m.key]) { delete this.state.clientBans[m.key]; this.dirty = true; } break;
+      case "shared": this.noteShared(m.ip, m.n); break;
+      case "stuffing": this.stuffing(m); break;
     }
+  }
+  // ------------------------------------------------------------ shared addresses
+  // An address a guard found many clients behind (or one inside a network you marked as
+  // shared): remembered a month, so every guard judges it client by client from the start
+  noteShared(raw, n) {
+    const ip = normIp(raw);
+    if (!isIP(ip) || isPrivate(ip) || !(n >= 2)) return;
+    const S = (this.state.shared ||= {}), was = S[ip];
+    if (was && was.n >= n && Date.now() - was.at < DAY) return;
+    delete S[ip];
+    S[ip] = { n: Math.max(n, was?.n || 0), at: Date.now() };
+    const keys = Object.keys(S);
+    if (keys.length > 5000) for (const k of keys.slice(0, keys.length - 5000)) delete S[k];
+    this.dirty = true;
+    this.broadcast({ t: "shared", ip, n: S[ip].n, at: S[ip].at });
+  }
+  sharedOf(ip) {
+    const s = this.state.shared?.[ip];
+    const marked = this.inSharedNets(ip);
+    return s || marked ? { n: s?.n || null, at: s?.at || null, marked } : null;
+  }
+  isShared(ip) { const s = this.state.shared?.[ip]; return !!(s && s.n >= 2 && Date.now() - s.at < SHARED_FOR) || this.inSharedNets(ip) || !!this.asn.lookup(ip)?.mobile; }
+  inSharedNets(ip) {
+    const text = this.settings.sharedNets || "";
+    if (text !== this.sharedNetsText) {
+      this.sharedNetsText = text;
+      const r = new RangeSet();
+      for (const x of text.split(/[\s,;]+/)) if (x) r.add(x);
+      r.seal();
+      this.sharedNets = r.start.length ? r : null;
+    }
+    return !!this.sharedNets?.has(ip);
+  }
+  // a client behind a shared address, banned by a guard: kept (and sent to every guard) until it ends
+  recordClientBan(raw, key, b, info) {
+    const ip = normIp(raw);
+    if (!isIP(ip) || !key || !b) return;
+    const C = (this.state.clientBans ||= {});
+    delete C[key];
+    C[key] = { ...b, ip, ua: String(info.ua || "").slice(0, 200), host: info.host || "", path: info.path || "" };
+    const keys = Object.keys(C);
+    if (keys.length > 5000) for (const k of keys.slice(0, keys.length - 5000)) delete C[k];
+    this.state.stats.clientBans = (this.state.stats.clientBans || 0) + 1;
+    this.dirty = true;
+    this.action(ip, "banned a client", `${b.reason}${b.crowd ? ` (one client of about ${b.crowd} behind this address; the address itself is not banned)` : ""}`, info);
+    this.broadcast({ t: "clientban", ip, key, b });
+  }
+  clientBansOf(ip) {
+    const now = Date.now();
+    return Object.entries(this.state.clientBans || {}).filter(([, b]) => b.ip === ip && b.until > now).map(([key, b]) => ({ key, ...b }));
+  }
+  // A credential-stuffing campaign a guard saw: a wave, with its addresses
+  stuffing(m) {
+    const path = String(m.path || "").slice(0, 120), host = String(m.host || "").slice(0, 100);
+    const members = (Array.isArray(m.members) ? m.members : []).map(normIp).filter((ip) => isIP(ip));
+    this.waves.raise(`stuffing:${host}${path}`, {
+      kind: "campaign", sev: "warn",
+      title: `Credential stuffing: ${m.addresses || members.length} addresses trying passwords on ${path || "a sign-in page"}`,
+      detail: `${m.fails || "Many"} failed sign-ins on ${host ? `${host}${path}` : path} within minutes, a few from each address. Until the attempts stop, that page asks for a clean reputation (no list, no flag, no hosting network, nothing scored here; unknown addresses are scanned first). Nobody is banned for it.`,
+      members, host,
+    }, Date.now());
+    this.log(`credential stuffing on ${host}${path}: ${m.fails} failed sign-ins from ${m.addresses} addresses`);
   }
   // Your devices, from the host's device keys: {list: [{id, name, ips, hosts, last…}], addresses: {ip: {last, devices}}}.
   // Recognizing them is exact (a sealed key, not a guess); their addresses are trusted as of when they were used.
@@ -278,10 +360,11 @@ export class Brain {
         per.set(e.ip, x);
       }
     }
-    // judged as the guard would have, had it been there
+    // judged as the guard would have, had it been there (a shared address: by the guard,
+    // client by client; the host's history can't tell its clients apart)
     const banned = [];
     for (const [ip, x] of per) {
-      if (this.state.bans[ip] || this.state.allow[ip] || this.isTrusted(ip) || this.own.has(ip) || isPrivate(ip)) continue;
+      if (this.state.bans[ip] || this.state.allow[ip] || this.isTrusted(ip) || this.own.has(ip) || isPrivate(ip) || this.isShared(ip)) continue;
       const v = this.verdicts.get(ip);
       if (x.payloads >= 2 || (!v?.benign && x.score >= 6)) {
         const b = this.ban(ip, `found in ${host === "aegis-burrow" ? "Aegis's" : "the host's"} history: ${x.payloads >= 2 ? `${x.payloads} payloads` : "probing"} (${x.paths.join(", ")})`,
@@ -302,10 +385,13 @@ export class Brain {
   // ------------------------------------------------------------ newer patterns, older lines
   // The log read again with the current signatures: lines that slipped through
   // get their pattern, and whoever they convict is banned by the guard's rules.
+  // An address several clients use (it says so, or its ordinary requests came from more than one
+  // browser) only gets its lines labelled: what one of them sent is no reason to ban the others.
   rescan() {
-    const per = new Map();
+    const per = new Map(), browsers = new Map();
     let marked = 0;
     for (const e of this.logs.ring) {
+      if (!e.sig && e.ua && e.st >= 200 && e.st < 400) { const s = browsers.get(e.ip) || new Set(); if (s.size < 3) s.add(e.ua); browsers.set(e.ip, s); }
       if (e.sig || e.dec !== "pass" && e.dec !== "seen" || e.auth || e.local || e.own) continue;
       const sig = inspect({ path: e.path, ua: e.ua || undefined, method: e.m || undefined });
       if (!sig.id || sig.probe && e.st >= 200 && e.st < 400) continue;      // a probe the app answered: it was here
@@ -320,6 +406,7 @@ export class Brain {
     const banned = [];
     for (const [ip, x] of per) {
       if (this.state.bans[ip] || this.state.allow[ip] || this.isTrusted(ip) || this.own.has(ip) || isPrivate(ip)) continue;
+      if (this.isShared(ip) || (browsers.get(ip)?.size || 0) >= 2) continue;
       if (x.payloads >= 2 || (!this.verdicts.get(ip)?.benign && x.score >= 6)) {
         if (this.ban(ip, `newer patterns, older requests: ${x.payloads >= 2 ? `${x.payloads} payloads` : "probing"} (${x.paths.join(", ")})`, { source: "payload", ttl: 30 * DAY, info: { host: x.host, country: x.cc } })) banned.push(ip);
       }
@@ -360,14 +447,19 @@ export class Brain {
     if (e.sig && !e.cat) { const c = categoryOf(e.sig); if (c) e.cat = c; }      // an older guard: the category from the signature
     const a = isIP(e.ip) && !e.local ? this.asn.lookup(e.ip) : null;
     if (a) { e.asn = a.asn; e.org = a.name; if (a.hosting) e.dc = true; if (!e.cc) e.cc = a.cc; }
-    const mine = !!(e.local || e.auth || this.isTrusted(e.ip) || this.state.allow[e.ip]);
+    // on a shared address (e.crowd: the guard judged it client by client) your sign-in there vouches
+    // for your browser (e.mine), not for everyone else behind it
+    const mine = !!(e.local || e.auth || e.mine || (!e.crowd && this.isTrusted(e.ip)) || this.state.allow[e.ip]);
     if (e.auth && !e.own) this.trust(e.ip, true);
     const [p, isNew] = this.profiles.add(e);
     if (a) { p.asn = a.asn; p.org = a.name; p.dc = !!a.hosting; }
     this.series.add(e, isNew, mine || !!e.local);
     this.logs.add(e);
     this.waves.feed(e, p, isNew, mine);
-    if (e.dec === "block") { const b = this.state.bans[e.ip]; if (b) { b.hits = (b.hits || 0) + 1; b.last = e.t; this.dirty = true; } }
+    if (e.dec === "block") {
+      const b = e.scope === "client" ? this.state.clientBans?.[`${e.ip}#${e.ck}`] : this.state.bans[e.ip];
+      if (b) { b.hits = (b.hits || 0) + 1; b.last = e.t; this.dirty = true; }
+    }
     if (!mine && !e.local && !e.own && isIP(e.ip)) this.enqueue(e.ip, { probe: !!e.sig });
   }
 
@@ -429,7 +521,7 @@ export class Brain {
     if (!isIP(ip) || isPrivate(ip) || this.own.has(ip)) return;
     const v = this.verdicts.get(ip);
     if (v && Date.now() - v.at < CLEARED_FOR) {                  // already known: say it again
-      if (this.letIn(ip, v.bad)) this.clear(ip); else if (!this.state.bans[ip]) this.broadcast({ t: "verdict", ip, v: { bad: v.bad, benign: v.benign, level: v.level, why: v.why, dc: !!this.asn.lookup(ip)?.hosting } });
+      if (this.letIn(ip, v.bad)) this.clear(ip); else if (!this.state.bans[ip]) this.broadcast({ t: "verdict", ip, v: this.guardVerdict(ip, v) });
       return;
     }
     if (this.offline && !this.remoteInjected) return;
@@ -462,12 +554,14 @@ export class Brain {
     const benign = !!src.greynoise?.result?.benign;
     const bad = (level === "malicious" || level === "suspicious") && !benign;
     const v = { at: Date.now(), level, why: r.verdict.why, bad, benign };          // the full lookup stays in intel's cache, not here: 50 000 of them is a lot of memory
+    const p = this.profiles.get(ip), net = this.asn.lookup(ip);
+    const dc = !!net?.hosting;
+    if (net?.mobile) v.mobile = true;
     this.verdicts.set(ip, v);
     if (this.verdicts.size > 50000) this.verdicts.delete(this.verdicts.keys().next().value);
-    const p = this.profiles.get(ip);
-    const dc = !!this.asn.lookup(ip)?.hosting;
-    // every verdict reaches the guard, clean ones too: whether the address is a hosting one (dc) decides how hard a listing counts there
-    this.broadcast({ t: "verdict", ip, v: { bad, benign, level, why: bad || benign ? v.why : [], dc } });
+    // every verdict reaches the guard, clean ones too: whether the address is a hosting one (dc) decides how hard
+    // a listing counts there, and a mobile carrier's (mobile) is judged client by client
+    this.broadcast({ t: "verdict", ip, v: this.guardVerdict(ip, v) });
     if (this.letIn(ip, bad)) this.clear(ip);
     if (!this.settings.auto || this.state.allow[ip] || this.state.bans[ip] || this.isTrusted(ip) || this.own.has(ip) || benign) return;
     const hard = [];
@@ -500,7 +594,9 @@ export class Brain {
     this.action(ip, "banned", b.reason, info);
     this.broadcast({ t: "ban", ip, b });
     this.noteBan(ip, b.reason);
-    this.reporters.enqueue({ ip, reason: b.reason, source: b.source, ...this.state.bans[ip], first: this.profiles.get(ip)?.first, last: Date.now() });
+    // a shared address banned briefly for what many of its clients did is not reported: the
+    // vendors would list a whole school or carrier for it
+    if (!b.shared) this.reporters.enqueue({ ip, reason: b.reason, source: b.source, ...this.state.bans[ip], first: this.profiles.get(ip)?.first, last: Date.now() });
   }
   ban(ip, reason, { source = "manual", ttl = 0, info = {} } = {}) {
     ip = normIp(ip);
@@ -520,11 +616,14 @@ export class Brain {
   }
   unban(ip) {
     ip = normIp(ip);
-    const had = !!this.state.bans[ip];
+    let had = !!this.state.bans[ip];
     delete this.state.bans[ip];
     this.verdicts.delete(ip);
+    // the clients banned behind it go too (clients: the guards forget them; a sign-in lifting
+    // a ban on its address doesn't let the clients banned behind it go)
+    for (const [k, b] of Object.entries(this.state.clientBans || {})) if (b.ip === ip) { delete this.state.clientBans[k]; had = true; }
     if (had) { this.state.stats.unbanned++; this.action(ip, "unbanned", "by you"); this.dirty = true; }
-    this.broadcast({ t: "unban", ip });
+    this.broadcast({ t: "unban", ip, clients: true });
     this.writeSnapshot();
     return had;
   }

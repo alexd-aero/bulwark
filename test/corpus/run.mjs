@@ -17,6 +17,7 @@ export function load(file) {
     const req = { method: "GET", path: target.replace(/ /g, "%20"), headers: {} };
     for (const x of extra) {
       if (x.startsWith("M=")) req.method = x.slice(2);
+      else if (x.startsWith("V=")) req.proto = x.slice(2);                 // the HTTP version (1.0, 1.1)
       else if (x.startsWith("H:")) { const e = x.indexOf("="); req.headers[x.slice(2, e).toLowerCase()] = x.slice(e + 1); }
     }
     req.ua = req.headers["user-agent"] ?? "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";

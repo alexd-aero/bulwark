@@ -16,6 +16,9 @@ const HOSTING = /amazon|aws|google|microsoft|azure|digitalocean|ovh|hetzner|lino
 
 // ...but not the home and mobile networks of the same companies (Google Fiber)
 const CONSUMER = /fiber|broadband|cable|residential|mobile|wireless|dsl|telecom|comcast|charter|verizon|t-mobile/i;
+// mobile carriers: their IPv4 addresses are carrier-grade NAT, hundreds of phones behind each,
+// so the guard judges them client by client from the first request
+const MOBILE = /mobile|mobility|wireless|cellular|cellco|\bmovil|\bmóvil|\bmovel|\bmóvel/i;
 
 class Table {
   constructor(n, big) {
@@ -69,7 +72,7 @@ export class Asn {
         let i = index.get(k);
         // a copy, not a slice: a sliced string keeps the whole decompressed text it came from
         // alive, and 85k names held ~40 MB of it (too much on a 1 GB machine)
-        if (i === undefined) { i = names.length; const own = Buffer.from(name).toString(); names.push({ cc: cc === "None" ? "" : Buffer.from(cc).toString(), name: own, hosting: HOSTING.test(own) && !CONSUMER.test(own) }); index.set(k, i); }
+        if (i === undefined) { i = names.length; const own = Buffer.from(name).toString(); names.push({ cc: cc === "None" ? "" : Buffer.from(cc).toString(), name: own, hosting: HOSTING.test(own) && !CONSUMER.test(own), mobile: MOBILE.test(own) }); index.set(k, i); }
         return i;
       };
       const read = async (k, big) => {
@@ -107,7 +110,7 @@ export class Asn {
     else if (isIP(ip) === 6 && this.t6) { t = this.t6; i = t.find(v6big(ip) >> 64n); }
     if (!t || i < 0) return null;
     const m = this.names[t.meta[i]];
-    return { asn: t.asn[i], name: m.name, cc: m.cc, hosting: m.hosting };
+    return { asn: t.asn[i], name: m.name, cc: m.cc, hosting: m.hosting, mobile: m.mobile && isIP(ip) === 4 };
   }
   view() { return { ranges: (this.t4?.n || 0) + (this.t6?.n || 0), at: this.at, error: this.error }; }
 }

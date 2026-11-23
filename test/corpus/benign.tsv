@@ -330,3 +330,49 @@ ok	/s?q=semicolon; usage
 ~ok	/	H:User-Agent=okhttp/4.12.0
 ~ok	/	H:User-Agent=
 ~ok	/	H:User-Agent=Mozilla/5.0 (X11; Linux x86_64) HeadlessChrome/120.0.0.0 Safari/537.36
+# ------------------------------------------------------------------ JWT (engine 3)
+ok	/api/me	H:Authorization=Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMDAxIiwibmFtZSI6IkJvYiIsImlhdCI6MTczNTY4OTYwMH0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c
+ok	/api/items	H:Authorization=Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6ImtleS0yMDI2LTAxIn0.eyJzdWIiOiJ1NDIiLCJzY29wZSI6Im5vbmUifQ.MEUCIQDfMxJ0sGgV3w8cL2hQ1tq1i0Wf3zrb8l1p0Hk7Nw2N9wIgL5o1
+ok	/api/feed?access_token=eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJib2IifQ.c2lnbmF0dXJl
+ok	/api/keys	H:Authorization=Bearer eyJhbGciOiJSUzI1NiIsImprdSI6Imh0dHBzOi8vYXBwLmV4YW1wbGUvLndlbGwta25vd24vandrcy5qc29uIn0.eyJzdWIiOiJib2IifQ.c2lnbmF0dXJl	H:Host=app.example
+ok	/api/notes	H:Authorization=Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXJyeSIsIm5vdGUiOiIuLi8uLi9ldGMvcGFzc3dkIGlzIGEgcGF0aCJ9.c2lnbmF0dXJl
+ok	/api/resource	H:Authorization=DPoP eyJhbGciOiJQUzI1NiIsImtpZCI6IjJmYTlmOGM0LTdkMWUtNGM1NS05ZTNhLTJlNmE4ZDBiMWM0ZiIsInR5cCI6ImF0K2p3dCJ9.eyJzdWIiOiJib2IiLCJjbGllbnRfaWQiOiJ3ZWIifQ.c2lnbmF0dXJl	H:DPoP=eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoibDh0RnJoeC0zNHRWM2hSSUNSRFk5ekNrRGxwQmhGNDJVUVVmV1ZBV0JGcyIsInkiOiI5VkU0amZfT2tfbzY0emJUVGxjdU5KYWpIbXQ2djlURFZyVTBDZHZHUkRBIn19.eyJodG0iOiJHRVQiLCJodHUiOiJodHRwczovL2FwcC5leGFtcGxlL2FwaSIsImlhdCI6MTczNTY4OTYwMCwianRpIjoiZTFqM1ZfYktpYzgtTEFFQiJ9.sig
+ok	/login?error=none&state=xyz
+ok	/search?q=jwt alg none attack explained
+ok	/oauth/callback?code=abc&id_token=eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImExYjJjM2Q0ZTVmNjA3MTgyOTNhNGI1YzZkN2U4ZjkwMTIzNDU2NzgifQ.eyJpc3MiOiJodHRwczovL2FjY291bnRzLmdvb2dsZS5jb20iLCJzdWIiOiIxMjM0NTY3ODkwIiwiYXVkIjoiYXBwIn0.eW91IGFyZSBjdXJpb3Vz
+# ------------------------------------------------------------------ GraphQL (engine 3)
+ok	/graphql?query={viewer{repositories(first:5){edges{node{issues(first:5){edges{node{comments(first:5){edges{node{body author{login}}}}}}}}}}}}
+ok	/graphql?operationName=Feed&variables={"first":20}&extensions={"persistedQuery":{"version":1,"sha256Hash":"ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b38"}}
+ok	/graphql?query=fragment F on User{id name} query{me{...F friends(first:10){...F}}}
+ok	/api/products?q={"price":{"lte":100}}
+ok	/search?q=graphql depth limit nested query {a{b{c}}}
+# ------------------------------------------------------------------ prototype (engine 3)
+ok	/docs/javascript/reference/global_objects/object/proto
+ok	/search?q=what is __proto__ in javascript
+ok	/products?category=prototype&sort=new
+ok	/x?data={"proto":"udp","constructor":"Bob"}
+ok	/api/models/prototype/v2
+# ------------------------------------------------------------------ smuggling (engine 3)
+ok	/api/data	M=POST	H:Content-Length=128	H:Connection=keep-alive
+ok	/ws	H:Connection=keep-alive, Upgrade	H:Upgrade=websocket
+ok	/index.html	H:Content-Length=0
+ok	/	H:Connection=Upgrade, HTTP2-Settings	H:Upgrade=h2c
+ok	/upload	M=POST	H:Transfer-Encoding=gzip, chunked
+# ------------------------------------------------------------------ paths (engine 3)
+ok	/page;jsessionid=1A2B3C4D5E6F
+ok	/api/v4/projects/group%2Fsubgroup%2Fproject/issues
+ok	/compare/v1.2...v1.3
+ok	/static/css/app.4f3a.css
+ok	/blog/what-is-web-cache-deception
+ok	/assets/fonts/inter.woff2?v=3.19
+# ------------------------------------------------------------------ hosts (engine 3)
+ok	/	H:X-Forwarded-Host=app.example
+ok	/	H:X-Forwarded-Proto=https	H:X-Forwarded-Port=443
+ok	/	H:X-Forwarded-Scheme=https
+ok	/	H:X-Forwarded-Prefix=/app
+# ------------------------------------------------------------------ Next.js / Vite (engine 3)
+ok	/_next/data/build123/index.json	H:x-nextjs-data=1
+ok	/	H:RSC=1	H:Next-Router-Prefetch=1
+ok	/src/assets/logo.svg?import
+ok	/src/styles/theme.css?inline
+ok	/dashboard	M=POST	H:Next-Action=0042f3c8e1a9b2d4c6e8f0a1b3c5d7e9f1a2b4c6d8

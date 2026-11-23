@@ -334,3 +334,49 @@ test("the IP Inspector over the API: a report (offline: nothing asked outside), 
   assert.ok(l.categories.length >= 20 && l.signatures.every((s) => s.cat && s.sev));
   assert.ok((await get("/api/logs?cat=secrets")).logs.length >= 14, "the log filters by category");
 });
+
+test("shared addresses: what the guards learn is kept and sent back, and nothing here bans one for its clients", async () => {
+  const school = "203.0.113.120", t0 = Date.now(), key = `${school}#k1`;
+  tell({ t: "shared", ip: school, n: 40 });
+  tell({ t: "clientban", ip: school, key, b: { reason: "sent 2 payloads (/.env, /.git/config)", until: t0 + 3600e3, source: "payload", at: t0, n: 1, crowd: 40 },
+         info: { host: "8790.tunnel.example", ua: "Mozilla/5.0 X", path: "/.git/config" } });
+  assert.ok(await until(() => app.brain.clientBansOf(school).length === 1));
+  assert.equal(app.brain.sharedOf(school).n, 40);
+  assert.ok(await until(() => got.some((m) => m.t === "shared" && m.ip === school) && got.some((m) => m.t === "clientban" && m.key === key)), "every guard hears of both");
+  const snap = app.brain.snapshot();
+  assert.ok(snap.shared.some(([ip]) => ip === school) && snap.clientBans.some(([k]) => k === key), "and gets them again when it connects");
+  assert.equal(app.brain.state.bans[school], undefined, "the address itself is not banned");
+  assert.ok(app.brain.state.actions.some((a) => a.ip === school && a.act === "banned a client" && /one client of about 40/.test(a.why)));
+  // payloads from two of its clients in the log: the rescan labels them and bans nobody; nor does it ban
+  // an address whose ordinary requests came from two browsers
+  const lines = (ip) => [["/", "Mozilla/5.0 A", 200], ["/", "Mozilla/5.0 B", 200], ["/js/raif_ch.js", "Mozilla/5.0 A", 302], ["/js/twint_ch.js", "Mozilla/5.0 B", 302], ["/bot-connect.js", "Mozilla/5.0 B", 302]]
+    .map(([path, ua, st], i) => ({ t: t0 + i, ip, cc: "US", host: "8790.tunnel.example", m: "GET", path, ua, dec: "pass", st, b: 0 }));
+  tell({ t: "ev", list: [...lines(school), ...lines("198.51.100.121")] });
+  await sleep(150);
+  app.brain.state.sigVersion = 1;
+  const r = app.brain.rescan();
+  assert.ok(r.marked >= 6);
+  assert.ok(!r.banned.includes(school) && !r.banned.includes("198.51.100.121"), r.banned.join());
+  // a shared address banned for 15 minutes (many of its clients at once) is not reported to the vendors
+  tell({ t: "ban", ip: school, b: { reason: "7 different clients behind this shared address attacked within 10 minutes", until: Date.now() + 15 * 60e3, source: "payload", at: Date.now(), shared: true }, info: {} });
+  assert.ok(await until(() => !!app.brain.state.bans[school]));
+  assert.ok(!app.brain.reporters.state.waiting.some((x) => x.ip === school));
+  // unbanning it lets its clients go too
+  app.brain.unban(school);
+  assert.equal(app.brain.clientBansOf(school).length, 0);
+  assert.ok(await until(() => got.some((m) => m.t === "unban" && m.ip === school && m.clients)), "the guards let them go too");
+  // a credential-stuffing campaign becomes a wave
+  tell({ t: "stuffing", host: "app.example", path: "/login", fails: 24, addresses: 9, members: ["198.51.100.1", "198.51.100.2", "198.51.100.3"], since: Date.now(), until: Date.now() + 30 * 60e3 });
+  assert.ok(await until(async () => (await get("/api/alerts")).alerts.some((a) => a.key === "stuffing:app.example/login")));
+  const wave = (await get("/api/alerts")).alerts.find((a) => a.key === "stuffing:app.example/login");
+  assert.match(wave.title, /^Credential stuffing: 9 addresses trying passwords on \/login/);
+  assert.match(wave.detail, /Nobody is banned for it/);
+  // shared networks you name in Settings reach the guards; anything but addresses and networks is refused
+  const put = (b) => fetch(base() + "/api/settings", { method: "PUT", headers: { "x-bulwark-key": "k", "Content-Type": "application/json" }, body: JSON.stringify(b) });
+  assert.equal((await put({ sharedNets: "0.0.0.0/0" })).status, 400);
+  assert.equal((await put({ sharedNets: "the school" })).status, 400);
+  assert.equal((await put({ sharedNets: "198.51.100.200/29, 198.51.100.208/28\n2001:db8::/48" })).status, 200);
+  assert.ok(await until(() => got.some((m) => m.t === "settings" && m.settings.sharedNets === "198.51.100.200/29 198.51.100.208/28 2001:db8::/48")));
+  assert.ok(app.brain.isShared("198.51.100.201") && !app.brain.isShared("198.51.100.199"));
+  assert.equal(app.brain.snapshot().settings.sharedNets, "198.51.100.200/29 198.51.100.208/28 2001:db8::/48");
+});

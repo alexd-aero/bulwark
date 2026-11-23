@@ -289,3 +289,49 @@ ok	/translate?q=%C2%BFC%C3%B3mo%20est%C3%A1s%3F&source=es&target=en
 ok	/products?tags[]=sale&tags[]=new&tags[]=featured
 ok	/report.csv?cols=name,email,signup_date&format=csv
 ok	/admin/dashboard	H:Cookie=admin_session=valid123; remember_me=1
+# ============ JWT (engine 3) ============
+ok	/api/me	H:Authorization=Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImExYjJjM2Q0ZTVmNjA3MTgyOTNhNGI1YzZkN2U4ZjkwMTIzNDU2NzgifQ.eyJpc3MiOiJodHRwczovL2FjY291bnRzLmdvb2dsZS5jb20iLCJzdWIiOiIxMjM0NTY3ODkwIiwiYXVkIjoiYXBwIn0.eW91IGFyZSBjdXJpb3Vz
+ok	/	H:Cookie=id_token=eyJhbGciOiJSUzI1NiIsImtpZCI6Im5PbzNaRHJPRFhFSzFqS1doWHNsSFJfS1hFZyJ9.eyJzdWIiOiJ0ZXJyeSIsInZlciI6Mn0.c2lnbmF0dXJl; lang=en
+ok	/api/x	H:Authorization=Bearer eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCIsImtpZCI6IjAifQ.eyJzdWIiOiJib2IiLCJhbGciOiJub25lIn0.c2lnbmF0dXJl
+ok	/api/resource	H:Authorization=Bearer eyJhbGciOiJQUzI1NiIsImtpZCI6IjJmYTlmOGM0LTdkMWUtNGM1NS05ZTNhLTJlNmE4ZDBiMWM0ZiIsInR5cCI6ImF0K2p3dCJ9.eyJzdWIiOiJib2IiLCJjbGllbnRfaWQiOiJ3ZWIifQ.c2lnbmF0dXJl
+ok	/api/x	H:Authorization=Bearer eyJhbGciOiJSUzI1NiIsIng1dCI6Ik1USXpORFUyTnpnNU1ERXlNelExTmpjNE9UQSJ9.eyJzdWIiOiJib2IifQ.c2lnbmF0dXJl
+ok	/api/secure	H:Authorization=Bearer eyJhbGciOiJSU0EtT0FFUCIsImVuYyI6IkEyNTZHQ00ifQ.OKOawDo13gRp2ojaHV7LFpZcgV7T6DVZKTyKOMTYUmKoTCVJRgckCL9kiMT03JGeipsEdY3mx.48V1_ALb6US04U3b.5eym8TW_c8SuK0ltJ3rpYIzOeDQz7TALvtu6UG9oMo4vpzs9tX_EFShS8iB7j6jiSdiwkIr3ajwQzaBtQD_A.XFBoMYUZodetZdvTiFvSkQ
+ok	/api/x	H:Authorization=Bearer none
+ok	/tools/jwt?alg=none&kid=../keys
+ok	/api/x	H:Authorization=Bearer eyJhbGciOiJSUzI1NiIsImtpZCI6ImF1dGgwfGtleS8yMDI1LXJvdGF0aW9uIn0.eyJzdWIiOiJib2IifQ.c2lnbmF0dXJl
+# ============ GRAPHQL (engine 3) ============
+ok	/graphql?query=query{small:image(size:SMALL){url} medium:image(size:MEDIUM){url} large:image(size:LARGE){url}}
+ok	/api/search?filter={"and":[{"or":[{"tag":{"eq":"a"}},{"tag":{"eq":"b"}}]},{"date":{"gt":"2024-01-01"}}]}
+ok	/graphql?query=query($n:Int=10){posts(last:$n) @include(if:true){title}}
+ok	/graphql?query={a:node(id:"1"){id} b:node(id:"2"){id} c:node(id:"3"){id} d:node(id:"4"){id}}
+ok	/graphql?query={shop{collections(first:10){edges{node{products(first:10){edges{node{variants(first:5){price}}}}}}}}}
+# ============ PROTOTYPE (engine 3) ============
+ok	/wiki/Prototype_pollution
+ok	/blog/understanding-constructor-prototype-chain
+ok	/api/objects?fields=constructor,prototype
+ok	/	H:Cookie=cart={"items":[{"id":1,"constructor":"lego"}]}
+ok	/learn/js/prototypes-and-__proto__
+# ============ SMUGGLING (engine 3) ============
+ok	/	H:Connection=keep-alive
+ok	/grpc.Service/Method	M=POST	H:Connection=TE	H:TE=trailers	H:Content-Type=application/grpc
+ok	/api/stream	M=PUT	H:Transfer-Encoding=chunked	V=1.1
+ok	/api/query	M=GET	H:Content-Length=48	H:Content-Type=application/json
+ok	/api/legacy	M=POST	H:Content-Length=12	V=1.0
+# ============ PATHS (engine 3) ============
+ok	/cars;color=red;year=2024/details
+ok	/files/download/report%2F2024.pdf
+ok	/release/v2..v3/notes
+ok	/wiki/C%23
+ok	/files/notes;draft.txt
+ok	/shop/item;ref=home/reviews
+# ============ HOSTS (engine 3) ============
+ok	/	H:Host=app.example:8443
+ok	/	H:Forwarded=for=198.51.100.7;proto=https;host=app.example
+ok	/	H:Host=[2001:db8::1]:8080
+ok	/	H:X-Forwarded-Host=app.example:443
+# ============ NEXT.JS / VITE (engine 3) ============
+ok	/dashboard	M=POST	H:Next-Action=7f3c8e1a9b2d4c6e8f0a1b3c5d7e9f1a2b4c6d8e	H:Next-Router-State-Tree=%5B%22%22%2C%7B%7D%5D
+ok	/blog	H:Next-Url=/blog	H:RSC=1
+ok	/src/lib/math.wasm?init
+ok	/node_modules/.vite/deps/react.js?v=4f3a2b1c
+ok	/docs/headers/location

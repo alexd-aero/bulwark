@@ -14,7 +14,14 @@
 //   deser(value)           serialized objects: YAML gadgets, pickle, node-serialize, PHP in base64
 //   ssti(value)            template injection beyond {{7*7}}
 //   oast(str)              out-of-band callback domains (Burp Collaborator, interactsh…)
-//   headers(h)             every request header that can carry an attack
+//   jwt(token)             a forged or tampered token: alg none, a kid that is a path,
+//                          a query or a command, a key fetched from elsewhere (jku,
+//                          x5u) or carried inside (jwk), an ECDSA signature of zeros
+//   graphql(query)         GraphQL built to exhaust a server: nested too deep, a
+//                          field asked a hundred times under aliases, directives piled up
+//   headers(h, ctx)        every request header that can carry an attack, and how
+//                          the request is framed (smuggling: a body on a GET, a
+//                          Transfer-Encoding on HTTP/1.0, Connection: Content-Length)
 
 // ------------------------------------------------------------------ addresses
 const V4META = new Set([0xa9fea9fe, 0xa9feaa02, 0x646464c8, 0xc00000c0]);   // 169.254.169.254, 169.254.170.2, 100.100.100.200, 192.0.0.192
@@ -255,31 +262,174 @@ export function oast(s) {
   return m ? { id: "oast", sev: "critical", why: `an out-of-band callback domain (${m[2]})` } : null;
 }
 
+// ------------------------------------------------------------------ tokens (JWT)
+// Only the token's header is read (it says how to check the signature), never
+// trusted: nothing here verifies anything. A JWE (five parts) is left alone.
+const B64URL = /^[A-Za-z0-9_-]+={0,2}$/;
+function b64json(s) {
+  if (s.length > 4096 || !B64URL.test(s)) return null;
+  try { const o = JSON.parse(Buffer.from(s, "base64url").toString("utf8")); return o && typeof o === "object" && !Array.isArray(o) ? o : null; } catch { return null; }
+}
+// the site a name belongs to, roughly (its last two labels): app.example and keys.app.example are one
+const siteOf = (h) => String(h || "").toLowerCase().replace(/^\[|\]$/g, "").replace(/:\d*$/, "").split(".").slice(-2).join(".");
+export function jwt(v, where = "", host = "") {
+  const t = String(v).trim();
+  if (t.charCodeAt(0) !== 101 || t.charCodeAt(1) !== 121 || t.charCodeAt(2) !== 74) return null;            // "eyJ": a JSON object, base64url
+  const d1 = t.indexOf("."), d2 = d1 < 0 ? -1 : t.indexOf(".", d1 + 1);
+  if (d1 < 10 || d2 < 0 || t.indexOf(".", d2 + 1) >= 0) return null;
+  const head = b64json(t.slice(0, d1));
+  if (!head) return null;
+  const w = where ? ` ${where}` : "";
+  const alg = typeof head.alg === "string" ? head.alg.trim() : "";
+  if (/^none$/i.test(alg)) return { id: "jwt-attack", sev: "critical", why: `a token with "alg": "${alg.slice(0, 8)}" (no signature to check)${w}`, cve: "CVE-2015-9235" };
+  if (/^ES(256|384|512)$/i.test(alg)) {
+    const sig = t.slice(d2 + 1);
+    if (sig === "MAYCAQACAQA" || (sig.length >= 40 && /^A+=*$/.test(sig))) return { id: "jwt-attack", sev: "critical", why: `an ECDSA signature of zeros (a psychic signature)${w}`, cve: "CVE-2022-21449" };
+  }
+  if (head.kid !== undefined && head.kid !== null) {
+    const kid = String(head.kid);
+    // ids are names, hashes, dates, URLs, "auth0|key-2"; not a climb out of a folder, a system file, SQL or a command
+    if (/\.\.[\/\\]|^[\/\\](dev|proc|etc|sys|tmp|var|usr|bin|boot|root|home)\b|^[a-z]:[\/\\]/i.test(kid)) return { id: "jwt-attack", sev: "critical", why: `a token whose kid is a file path (${kid.slice(0, 40)})${w}` };
+    if (/['"]\s*(union|select|or|and)\b|['"]\s*(--|#|\/\*)|;\s*(select|drop|insert|update|delete)\b/i.test(kid)) return { id: "jwt-attack", sev: "critical", why: `a token whose kid is SQL (${kid.slice(0, 40)})${w}` };
+    if (shell(kid)) return { id: "jwt-attack", sev: "critical", why: `a token whose kid is a command (${kid.slice(0, 40)})${w}` };
+  }
+  // where to fetch the key from: a token that names its own key server is asking to be believed
+  for (const k of ["jku", "x5u"]) {
+    if (head[k] === undefined) continue;
+    const u = String(head[k]);
+    const m = /^([a-z][a-z0-9+.-]*):\/\/([^\/?#]*)/i.exec(u);
+    if (!m || m[1].toLowerCase() !== "https") return { id: "jwt-attack", sev: "critical", why: `a token that fetches its key over ${m ? m[1] : "a non-URL"} (${k}: ${u.slice(0, 60)})${w}` };
+    const auth = m[2];
+    if (auth.indexOf("@") >= 0 || oast(u)) return { id: "jwt-attack", sev: "critical", why: `a token that fetches its key from ${auth.slice(0, 60)} (${k})${w}` };
+    const h = auth[0] === "[" ? auth.slice(0, auth.indexOf("]") + 1) : auth.replace(/:\d*$/, "");
+    if (hostKind(h) || /^[\d.]+$/.test(h) || h[0] === "[") return { id: "jwt-attack", sev: "critical", why: `a token that fetches its key from an address (${k}: ${h.slice(0, 40)})${w}` };
+    if (!host || siteOf(h) !== siteOf(host)) return { id: "jwt-attack", sev: "high", why: `a token that fetches its key from another site (${k}: ${h.slice(0, 50)})${w}` };
+  }
+  if (head.jwk && typeof head.jwk === "object") return { id: "jwt-attack", sev: "high", why: `a token that carries its own key (jwk)${w}`, cve: "CVE-2018-0114" };
+  return null;
+}
+
+// ------------------------------------------------------------------ GraphQL
+// One pass over the query (strings skipped): how deep it nests, how many
+// aliases it uses and how often one field is asked under them, how many
+// directives. Real queries nest about ten deep (connections: edges, node) and
+// alias a field a few times; attacks go far past both.
+const IDENT = /[_A-Za-z]\w*/y;
+export function graphql(v) {
+  if (v.length < 12 || v.indexOf("{") < 0) return null;
+  let depth = 0, max = 0, paren = 0, aliases = 0, dirs = 0, top = 0, field = null;
+  for (let i = 0; i < v.length; i++) {
+    const c = v.charCodeAt(i);
+    if (c === 34) { for (i++; i < v.length && v.charCodeAt(i) !== 34; i++) if (v.charCodeAt(i) === 92) i++; continue; }   // "a string"
+    if (c === 123) { if (++depth > max) max = depth; }
+    else if (c === 125) depth--;
+    else if (c === 40) paren++;
+    else if (c === 41) paren--;
+    else if (c === 64) dirs++;
+    else if (c === 58 && paren <= 0 && depth > 0) {                      // alias: field
+      let j = i + 1;
+      while (v.charCodeAt(j) === 32) j++;
+      IDENT.lastIndex = j;
+      const m = IDENT.exec(v);
+      if (m) {
+        aliases++;
+        const n = ((field ||= new Map()).get(m[0]) || 0) + 1;
+        field.set(m[0], n);
+        if (n > top) top = n;
+      }
+    }
+  }
+  const intro = v.indexOf("__schema") >= 0 || /__type\b/.test(v);
+  if (intro && max >= 8) return { id: "graphql-abuse", sev: "critical", why: `GraphQL introspection nested ${max} deep (a schema-cycle denial of service)` };
+  if (max > 25) return { id: "graphql-abuse", sev: "critical", why: `a GraphQL query nested ${max} deep` };
+  if (top >= 20) return { id: "graphql-abuse", sev: "critical", why: `the same GraphQL field asked ${top} times under aliases (batching past rate limits)` };
+  if (aliases >= 100) return { id: "graphql-abuse", sev: "critical", why: `${aliases} aliases in one GraphQL query` };
+  if (dirs >= 50) return { id: "graphql-abuse", sev: "critical", why: `${dirs} directives in one GraphQL query (directive overloading)` };
+  if (max > 15) return { id: "graphql-abuse", sev: "high", why: `a GraphQL query nested ${max} deep` };
+  if (aliases >= 40) return { id: "graphql-abuse", sev: "high", why: `${aliases} aliases in one GraphQL query` };
+  return null;
+}
+
+// prototype pollution as JSON keys ({"__proto__": …}, {"constructor": {"prototype": …}})
+export const PROTO_JSON = /["']__proto__["']\s*:|["']constructor["']\s*:\s*\{\s*["']prototype["']\s*:/i;
+
 // ------------------------------------------------------------------ headers
 // headers no attack hides in, or that the engine reads elsewhere (User-Agent, Referer)
 const SKIP_H = new Set(["host", "user-agent", "referer", "accept", "accept-encoding", "accept-language", "connection", "cache-control", "pragma", "upgrade-insecure-requests",
                         "dnt", "priority", "te", "upgrade", "keep-alive", "purpose", "save-data", "viewport-width", "dpr", "device-memory", "rtt", "downlink", "ect",
                         "x-requested-with", "x-forwarded-proto", "x-forwarded-port", "x-forwarded-host", "cdn-loop", "cf-ray", "cf-ipcountry", "cf-visitor", "cf-connecting-ip",
-                        "cf-ew-via", "cf-worker", "x-real-ip-verified", "content-encoding", "accept-charset", "origin-agent-cluster", "x-aegis-front-host"]);
+                        "cf-ew-via", "cf-worker", "x-real-ip-verified", "content-encoding", "accept-charset", "origin-agent-cluster", "x-aegis-front-host",
+                        "dpop"]);       // a DPoP proof carries its public key (jwk) by design
 const IPISH = new Set(["x-forwarded-for", "x-real-ip", "x-client-ip", "true-client-ip", "x-originating-ip", "x-remote-ip", "x-remote-addr", "client-ip", "x-cluster-client-ip", "forwarded", "x-host", "x-forwarded-server"]);
+// headers that name the host a request is for: anything but a host name there is an injection
+// (password-reset links and cached pages built from it point elsewhere)
+const HOSTISH = new Set(["host", "x-forwarded-host", "x-host", "x-original-host", "x-forwarded-server", "x-http-host-override", "x-backend-host"]);
+const HOSTNAME = /^(?:\[[0-9a-f:.]+\]|[a-z0-9_][a-z0-9_.-]{0,252})(?::\d{1,5})?$/i;
+const SCHEMEISH = new Set(["x-forwarded-proto", "x-forwarded-scheme", "x-forwarded-protocol", "x-url-scheme"]);
+const PREFIXISH = new Set(["x-forwarded-prefix", "x-forwarded-path"]);
 const DEFAULT_CREDS = new Set(["admin:admin", "admin:password", "admin:", "admin:1234", "admin:12345", "admin:123456", "root:root", "root:toor", "root:", "root:admin", "tomcat:tomcat", "tomcat:s3cret", "admin:tomcat",
                                "manager:manager", "user:user", "guest:guest", "test:test", "administrator:administrator", "admin:admin123", "ubnt:ubnt", "pi:raspberry", "support:support", "weblogic:weblogic1",
                                "admin:changeme", "elastic:changeme", "kibana:changeme", "grafana:admin", "nagiosadmin:nagiosadmin", "cisco:cisco", "oracle:oracle", "postgres:postgres", "sa:", "sa:sa"]);
 const GATE = /\$\{|%\{|\(\)\s*\{|<[a-z?!%\/]|['"`;|]|\.\.[\/\\]|\$\(|rO0AB|jndi|\{\{|\.oast|oastify|interact|burpcollab|dnslog|!!|_\$\$ND/i;
-const H = (id, sev, why) => ({ id, sev, why });
-// h: {name: value} with lowercased names (Node's req.headers) -> [{id, sev, why}]
-export function headers(h, look) {
+// Connection: names the headers a proxy must drop; asking it to drop these is how
+// a front end's framing or its view of the client is taken apart (hop-by-hop abuse)
+const HOP = /(?:^|,)\s*(?:content-length|transfer-encoding|host|x-forwarded-[\w-]+|x-real-ip|forwarded|authorization|cookie|cf-connecting-ip|true-client-ip|x-client-ip)\s*(?:,|$)/i;
+const STATIC = /\.(?:css|m?js|png|jpe?g|gif|ico|svg|webp|avif|woff2?|ttf|txt|xml|map)$/i;
+const NEXT_ACTION = /^[0-9a-f]{40,64}$/i;           // a Server Action's id: a hash
+const H = (id, sev, why, cve) => (cve ? { id, sev, why, cve } : { id, sev, why });
+const NOHITS = Object.freeze([]);
+// What a value means (code, a command, SQL, markup) is the costly part, and a
+// browser sends the same cookie on every request: kept per header value (bounded).
+const hcache = new Map();
+// h: {name: value} with lowercased names (Node's req.headers), ctx: {method, proto, path, host}
+// -> [{id, sev, why, cve?}]
+export function headers(h, look, ctx = {}) {
   const out = [];
   if (!h || typeof h !== "object") return out;
-  let te = null, cl = null;
+  let te = null, cl = null, conn = null;
   for (const name in h) {
     let v = h[name];
     if (v === undefined || v === null) continue;
     if (typeof v !== "string") v = Array.isArray(v) ? v.join(", ") : String(v);
     if (name === "transfer-encoding") { te = v; continue; }
     if (name === "content-length") { cl = v; continue; }
+    if (name === "connection") { conn = v; continue; }
+    // a line break inside a value: a folded header (obs-fold), or one smuggled in
+    if (v.indexOf("\n") >= 0 || v.indexOf("\r") >= 0) { out.push(H("smuggling", "high", `a line break inside the ${name} header (obs-fold)`)); continue; }
+    if (HOSTISH.has(name)) {
+      const o = oast(v);
+      if (o) { out.push({ ...o, why: `${o.why} in the ${name} header` }); continue; }
+      const parts = name === "host" ? [v] : v.split(",");                          // X-Forwarded-Host may list every hop
+      if (parts.some((p) => !HOSTNAME.test(p.trim()))) {
+        if (/<\s*\/?\s*[a-z]|javascript\s*:|["'`]\s*>/i.test(v)) out.push(H("header-attack", "critical", `markup in the ${name} header`));
+        else out.push(H("host-header", "high", `${name}: ${v.slice(0, 60)} (not a host name: host-header injection, cache poisoning)`));
+        continue;
+      }
+      if (name === "host" || name === "x-forwarded-host") continue;
+    } else if (SCHEMEISH.has(name)) {
+      if (!/^\s*(https?|wss?)\s*(,|$)/i.test(v)) out.push(H("host-header", "high", `${name}: ${v.slice(0, 30)} (cache poisoning)`));
+      continue;
+    } else if (PREFIXISH.has(name)) {
+      if (!/^\/(?![\/\\])[\w\-.~%\/]*$/.test(v.trim())) out.push(H("host-header", "high", `${name}: ${v.slice(0, 40)} (cache poisoning)`));
+      continue;
+    } else if (name === "forwarded") {
+      for (const m of v.matchAll(/(?:^|[;,])\s*host\s*=\s*("[^"]*"|[^;,]*)/gi)) {
+        const x = m[1].replace(/^"|"$/g, "").trim();
+        if (!HOSTNAME.test(x)) { out.push(H("host-header", "high", `Forwarded: host=${x.slice(0, 40)} (not a host name)`)); break; }
+      }
+    }
     if (SKIP_H.has(name) || name.startsWith("sec-") || name.startsWith("if-") || name.startsWith("x-aegis") || name.startsWith("x-burrow") || name === "x-gate") continue;
     if (name === "x-middleware-subrequest") { out.push(H("nextjs-middleware", "critical", `x-middleware-subrequest: ${v.slice(0, 60)}`)); continue; }
+    // Next.js's own internal headers, from outside
+    if (name === "x-now-route-matches") { out.push(H("nextjs-cache-poison", "critical", `x-now-route-matches: ${v.slice(0, 40)} (only Next.js itself sends it)`)); continue; }
+    if (name === "next-action") { if (!NEXT_ACTION.test(v.trim())) out.push(H("nextjs-rsc", "high", `Next-Action: ${v.slice(0, 30)} (not a Server Action id: a React Server Components exploit probe)`)); continue; }
+    // a Location header in a request: Next.js middleware that passes the request's headers on follows it
+    if (name === "location") {
+      const m = /^\s*[a-z][\w+.-]*:\/\/(?:[^@\/?#]*@)?(\[[^\]]+\]|[^\/:?#\s]+)/i.exec(v);
+      const k = m ? hostKind(m[1]) : null;
+      out.push(H("nextjs-ssrf", k ? "critical" : "high", `a Location header in a request (${v.slice(0, 60)})${k ? `: ${k === "meta" ? "the cloud metadata service" : "an internal address"}` : ""}`));
+      continue;
+    }
     if (name === "spring.cloud.function.routing-expression") { out.push(H("spring-function", "critical", "a SpEL routing expression header")); continue; }
     if (name === "x-original-url" || name === "x-rewrite-url" || name === "x-override-url") { out.push(H("access-bypass", "medium", `${name}: ${v.slice(0, 60)}`)); continue; }
     if (name === "x-http-method-override" || name === "x-http-method" || name === "x-method-override") { if (/^(trace|track|debug|connect)$/i.test(v.trim())) out.push(H("trace-method", "medium", `${name}: ${v.slice(0, 20)}`)); continue; }
@@ -290,47 +440,83 @@ export function headers(h, look) {
       continue;
     }
     if (IPISH.has(name) && /^[\d.:,\s\[\]a-f]*$/i.test(v) && v.split(",").some((x) => { const k = hostKind(x.trim().replace(/^\[|\]$/g, "")); return k === "loop" || k === "meta"; })) { out.push(H("ip-spoof", "medium", `${name}: ${v.slice(0, 60)} (posing as this machine)`)); continue; }
-    if (v.length < 3 || !GATE.test(v)) continue;
-    const where = `in the ${name} header`;
-    const add = (r) => { if (r) out.push({ ...r, why: `${r.why} ${where}` }); return !!r; };
-    if (name === "content-type" && /%\{|\$\{|#_memberaccess|@ognl|ognlcontext/i.test(v)) { out.push(H("struts-ognl", "critical", "an OGNL expression in Content-Type (S2-045)")); continue; }
-    if (/\(\)\s*\{\s*[:_a-z]*\s*;?\s*\}\s*;/i.test(v)) { out.push(H("shellshock", "critical", `a function definition ${where}`)); continue; }
-    const j = look.jndi(v, where);
-    if (j) { out.push(j); continue; }
-    if (/%\{\s*\(#|\$\{\s*\(#|#_memberaccess|@ognl\.ognlcontext/i.test(v)) { out.push(H("struts-ognl", "critical", `an OGNL expression ${where}`)); continue; }
-    if (add(oast(v))) continue;
-    if (name === "cookie") {
-      for (const crumb of v.split(";")) {
-        const e = crumb.indexOf("=");
-        let cv = (e < 0 ? crumb : crumb.slice(e + 1)).trim();
-        if (cv.length < 4) continue;
-        if (cv.indexOf("%") >= 0) { try { cv = decodeURIComponent(cv); } catch { /* as it is */ } }
-        if (!/['"`;|<$(\\.!]|rO0AB|^(Tz|YT|gAS)/.test(cv)) continue;
-        if (add(deser(cv))) break;
-        if (/^rO0AB[A-Za-z0-9+/]{8}/.test(cv)) { out.push(H("deser", "critical", `a Java serialized object ${where}`)); break; }
-        if (/(\.\.[\/\\]){2,}|\.\.[\/\\].*(etc\/passwd|win\.ini|\.env)/i.test(cv)) { out.push(H("traversal", "critical", `../ ${where}`)); break; }
-        if (add(shell(cv)) || add(code(cv))) break;
-        if (/<\s*(script|svg|img|iframe)\b|\bon(error|load)\s*=|javascript\s*:/i.test(cv)) { out.push(H("xss", "critical", `markup ${where}`)); break; }
-        if (cv.indexOf("'") >= 0) { const q = look.sqli(cv); if (q?.sev === "critical") { out.push(H("sqli", "critical", `${q.why} ${where}`)); break; } }
-      }
-      continue;
+    // tokens: a JWT needs none of the characters the gate below waits for
+    if (v.indexOf("eyJ") >= 0) {
+      const where = `in the ${name} header`;
+      let j = null;
+      if (name === "cookie") { for (const crumb of v.split(";")) { const e = crumb.indexOf("="); const cv = crumb.slice(e + 1).trim(); if (cv.startsWith("eyJ") && (j = jwt(cv, `in a cookie`, ctx.host || h.host))) break; } }
+      else if (name === "authorization") { const m = /^\s*(?:bearer|jwt|token|dpop)\s+(eyJ\S+)/i.exec(v); if (m) j = jwt(m[1], where, ctx.host || h.host); }
+      else if (v.startsWith("eyJ")) j = jwt(v, where, ctx.host || h.host);
+      if (j) out.push(j);
     }
-    if (name === "authorization") {
-      if (/^bearer\s/i.test(v) && v.indexOf("'") >= 0) { const q = look.sqli(v.slice(7)); if (q) out.push(H("sqli", "critical", `${q.why} ${where}`)); }
-      continue;
+    // (a cookie may hold its JSON percent-encoded: %7B%22…)
+    if (v.length < 3 || !(GATE.test(v) || name === "cookie" && /%(2[247]|3[cC]|60|7[bBcC])/.test(v))) continue;
+    const key = name + "\u0001" + v;
+    let r = hcache.get(key);
+    if (r === undefined) {
+      r = meaning(name, v, look);
+      if (hcache.size >= 2048) hcache.clear();
+      if (key.length < 4096) hcache.set(key, r);
     }
-    if (IPISH.has(name) && (/^[\w.:,\s\[\]-]*$/.test(v) || name === "forwarded" && /^(\s*(for|by|proto|host)=("[^"]*"|[^;,"]*)\s*[;,]?)+$/i.test(v))) continue;     // an address list, or Forwarded: for=…;proto=…
-    // anything else: a header is never code, a command, SQL or markup
-    if (add(shell(v)) || add(code(v)) || add(ssti(v))) continue;
-    if (/<\s*(script|svg|img|iframe|body)\b|<\?php|\bon(error|load)\s*=|javascript\s*:/i.test(v)) { out.push(H("header-attack", "critical", `markup or PHP ${where}`)); continue; }
-    if (/['"]/.test(v) || /\b(union|select|sleep|benchmark|waitfor)\b/i.test(v)) { const q = look.sqli(v); if (q && (q.sev === "critical" || IPISH.has(name))) { out.push(H("sqli", "critical", `${q.why} ${where}`)); continue; } }
+    for (const x of r) out.push(x);
   }
   // request smuggling: both lengths, or a Transfer-Encoding only some servers understand
+  const m = String(ctx.method || "GET").toUpperCase();
   if (te !== null) {
     const t = te.trim().toLowerCase();
     if (t !== "chunked" && !/^((gzip|deflate|br|compress|identity)\s*,\s*)+chunked$/.test(t)) out.push(H("smuggling", "high", `an obfuscated Transfer-Encoding (${JSON.stringify(te.slice(0, 30))})`));
     else if (cl !== null) out.push(H("smuggling", "high", "both Content-Length and Transfer-Encoding (request smuggling)"));
+    // a body where none belongs: a front end that ignores it leaves it for the back end as the next request
+    else if (m === "GET" || m === "HEAD" || m === "OPTIONS") out.push(H("smuggling", "high", `a chunked body on a ${m} (request smuggling)`));
+    else if (ctx.proto === "1.0") out.push(H("smuggling", "high", "Transfer-Encoding on HTTP/1.0, which has none (request smuggling)"));
   }
-  if (cl !== null && !/^\s*\d{1,15}\s*$/.test(cl)) out.push(H("smuggling", "high", `a malformed Content-Length (${JSON.stringify(cl.slice(0, 30))})`));
+  if (cl !== null) {
+    if (!/^\s*\d{1,15}\s*$/.test(cl)) out.push(H("smuggling", "high", `a malformed Content-Length (${JSON.stringify(cl.slice(0, 30))})`));
+    else if ((m === "GET" || m === "HEAD") && Number(cl) > 0) {
+      const p = String(ctx.path || ""), q = p.indexOf("?");
+      if (STATIC.test(q < 0 ? p : p.slice(0, q))) out.push(H("smuggling", "high", `a ${cl.trim()}-byte body on a ${m} for a static file (CL.0 request smuggling)`));
+    }
+  }
+  if (conn !== null && HOP.test(conn)) out.push(H("smuggling", "high", `Connection: ${conn.slice(0, 50)} (asks a proxy to drop a header it relies on)`));
   return out;
+}
+// one header value that got past the gate: what it means
+function meaning(name, v, look) {
+  const out = [];
+  const where = `in the ${name} header`;
+  const add = (r) => { if (r) out.push({ ...r, why: `${r.why} ${where}` }); return !!r; };
+  if (name === "content-type" && /%\{|\$\{|#_memberaccess|@ognl|ognlcontext/i.test(v)) { out.push(H("struts-ognl", "critical", "an OGNL expression in Content-Type (S2-045)")); return out; }
+  if (/\(\)\s*\{\s*[:_a-z]*\s*;?\s*\}\s*;/i.test(v)) { out.push(H("shellshock", "critical", `a function definition ${where}`)); return out; }
+  const j = look.jndi(v, where);
+  if (j) { out.push(j); return out; }
+  if (/%\{\s*\(#|\$\{\s*\(#|#_memberaccess|@ognl\.ognlcontext/i.test(v)) { out.push(H("struts-ognl", "critical", `an OGNL expression ${where}`)); return out; }
+  if (add(oast(v))) return out;
+  if (PROTO_JSON.test(v)) { out.push(H("proto-pollution", "critical", `prototype pollution (a __proto__ key) ${where}`)); return out; }
+  if (name === "cookie") {
+    for (const crumb of v.split(";")) {
+      const e = crumb.indexOf("=");
+      let cv = (e < 0 ? crumb : crumb.slice(e + 1)).trim();
+      if (cv.length < 4) continue;
+      if (cv.indexOf("%") >= 0) { try { cv = decodeURIComponent(cv); } catch { /* as it is */ } }
+      if (!/['"`;|<$(\\.!]|rO0AB|^(Tz|YT|gAS)/.test(cv)) continue;
+      if (add(deser(cv))) break;
+      if (/^rO0AB[A-Za-z0-9+/]{8}/.test(cv)) { out.push(H("deser", "critical", `a Java serialized object ${where}`)); break; }
+      if (/(\.\.[\/\\]){2,}|\.\.[\/\\].*(etc\/passwd|win\.ini|\.env)/i.test(cv)) { out.push(H("traversal", "critical", `../ ${where}`)); break; }
+      if (PROTO_JSON.test(cv)) { out.push(H("proto-pollution", "critical", `prototype pollution (a __proto__ key) ${where}`)); break; }
+      if (add(shell(cv)) || add(code(cv))) break;
+      if (/<\s*(script|svg|img|iframe)\b|\bon(error|load)\s*=|javascript\s*:/i.test(cv)) { out.push(H("xss", "critical", `markup ${where}`)); break; }
+      if (cv.indexOf("'") >= 0) { const q = look.sqli(cv); if (q?.sev === "critical") { out.push(H("sqli", "critical", `${q.why} ${where}`)); break; } }
+    }
+    return out.length ? out : NOHITS;
+  }
+  if (name === "authorization") {
+    if (/^bearer\s/i.test(v) && v.indexOf("'") >= 0) { const q = look.sqli(v.slice(7)); if (q) out.push(H("sqli", "critical", `${q.why} ${where}`)); }
+    return out.length ? out : NOHITS;
+  }
+  if (IPISH.has(name) && (/^[\w.:,\s\[\]-]*$/.test(v) || name === "forwarded" && /^(\s*(for|by|proto|host)=("[^"]*"|[^;,"]*)\s*[;,]?)+$/i.test(v))) return NOHITS;     // an address list, or Forwarded: for=…;proto=…
+  // anything else: a header is never code, a command, SQL or markup
+  if (add(shell(v)) || add(code(v)) || add(ssti(v))) return out;
+  if (/<\s*(script|svg|img|iframe|body)\b|<\?php|\bon(error|load)\s*=|javascript\s*:/i.test(v)) { out.push(H("header-attack", "critical", `markup or PHP ${where}`)); return out; }
+  if (/['"]/.test(v) || /\b(union|select|sleep|benchmark|waitfor)\b/i.test(v)) { const q = look.sqli(v); if (q && (q.sev === "critical" || IPISH.has(name))) { out.push(H("sqli", "critical", `${q.why} ${where}`)); return out; } }
+  return out.length ? out : NOHITS;
 }

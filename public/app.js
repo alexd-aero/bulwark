@@ -26,8 +26,10 @@ const ICONS = {
   phone: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="6.5" y="2.5" width="11" height="19" rx="2.2"/><path d="M10.5 18.5h3"/></svg>',
   laptop: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="4" y="4.5" width="16" height="11" rx="1.5"/><path d="M2 19.5h20"/></svg>',
   mail: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.2"/><path d="m3.8 6.8 8.2 6.2 8.2-6.2"/></svg>',
+  shield: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 6v6c0 5 3.4 8.6 8 9.9 4.6-1.3 8-4.9 8-9.9V6l-8-3Z"/></svg>',
   gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>',
 };
+const icon = (k) => ICONS[k] || "";
 for (const i of document.querySelectorAll("[data-i]")) i.innerHTML = ICONS[i.dataset.i] || "";
 
 const DEC = { pass: ["pass", "through"], drop: ["drop", "payload dropped"], block: ["block", "blocked"], ban: ["ban", "banned"], seen: ["seen", "from the host's history"], check: ["check", "checked first"] };
@@ -66,9 +68,27 @@ const catBars = (rows) => { const max = Math.max(1, ...rows.map((r) => r.n)); re
 
 // ------------------------------------------------------------------ overview
 async function loadOverview() {
-  const [ov, series] = await Promise.all([api(`overview?span=${S.span}`), api(`series?span=${S.span}&points=${Math.max(60, Math.min(240, Math.floor(app.clientWidth / 6)))}`)]);
-  S.ov = ov; S.series = series;
+  const [ov, series, recent] = await Promise.all([api(`overview?span=${S.span}`), api(`series?span=${S.span}&points=${Math.max(60, Math.min(240, Math.floor(app.clientWidth / 6)))}`),
+    api("logs?" + new URLSearchParams({ dec: "bad", limit: 12 })).catch(() => ({ logs: [] }))]);
+  S.ov = ov; S.series = series; S.recent = recent.logs || [];
   chrome();
+}
+// How things stand, in one word: a critical alert is an attack, a warning or strict mode a wave being watched
+function stateOf(o) {
+  const top = (o.alerts || []).filter((a) => a.sev !== "info");
+  if (top.some((a) => a.sev === "critical")) return { k: "attack", title: "Under attack", line: top[0].title };
+  if (top.length || o.strictUntil > Date.now()) return { k: "watch", title: "Watching a wave", line: top[0]?.title || "Strict mode is on: the first payload bans." };
+  return { k: "calm", title: "All quiet", line: "Nothing unusual. Every request is still checked, in microseconds." };
+}
+const SHIELD = '<svg viewBox="0 0 64 64" fill="none" aria-hidden="true"><path d="M32 5 9 13v17c0 14.6 9.7 25.6 23 29 13.3-3.4 23-14.4 23-29V13L32 5Z" class="sh-b"/><path d="M32 12 15 18v12c0 11 7.2 19.4 17 22.3 9.8-2.9 17-11.3 17-22.3V18L32 12Z" class="sh-i"/><path d="m24 32 6 6 11-12" class="sh-t"/></svg>';
+// the stopped requests, minute by minute, as a small glowing line for the hero
+function heroSpark(series) {
+  const pts = (series?.points || []).map((p) => (p.drop || 0) + (p.block || 0) + (p.ban || 0) + (p.check || 0));
+  if (pts.length < 2) return "";
+  const w = 320, hg = 70, max = Math.max(1, ...pts);
+  const xy = pts.map((v, i) => [(i / (pts.length - 1)) * w, hg - (v / max) * (hg - 6) - 3]);
+  const d = xy.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`).join(" ");
+  return `<svg class="hero-spark" viewBox="0 0 ${w} ${hg}" preserveAspectRatio="none" aria-hidden="true"><path class="a" d="${d} L${w} ${hg} L0 ${hg} Z"/><path class="l" d="${d}" vector-effect="non-scaling-stroke"/></svg>`;
 }
 function alertBanner(alerts) {
   const top = (alerts || []).filter((a) => a.sev !== "info");
@@ -82,47 +102,71 @@ function renderOverview() {
   const o = S.ov;
   if (!o) { app.innerHTML = '<p class="muted"><span class="spin"></span> Loading…</p>'; return; }
   const T = o.totals || {}, bad = (T.drop || 0) + (T.block || 0) + (T.ban || 0) + (T.check || 0);
-  const strict = o.strictUntil > Date.now();
+  const strict = o.strictUntil > Date.now(), st = stateOf(o);
+  const hosts = o.sensors.length ? o.sensors.map((s) => h(s.host || "a host")).join(", ") : "";
+  const cats = o.tops.cats || [], CATS = 8;
   app.innerHTML = `
-    <div class="head"><div><h1>Overview</h1><p>Every request through ${o.sensors.length ? o.sensors.map((s) => h(s.host || "a host")).join(", ") : "your hosts"} is checked in microseconds; what is slow happens here, behind it.</p></div>
-      <div class="spacer"></div>${seg("span", S.span)}</div>
-    ${alertBanner(o.alerts)}
+    <div class="head"><div><h1>Overview</h1></div><div class="spacer"></div>${seg("span", S.span)}</div>
     ${!o.sensors.length ? `<div class="banner warn"><span class="pill warn">NO SENSOR</span><div class="grow">No host is connected yet. Install Bulwark in Aegis × Burrow (Burrow → Addons) and its guard connects here by itself.</div></div>` : ""}
-    <div class="grid g4" style="margin-bottom:14px">
-      <div class="card stat"><b>${fmtN(T.req || 0)}</b><span>requests</span><div class="sub">${fmtB(T.bytes || 0)} · ${fmtN(o.tops.seen)} addresses</div></div>
-      <div class="card stat ${bad ? "hot" : ""}"><b>${fmtN(bad)}</b><span>requests stopped</span><div class="sub">${fmtN(T.drop || 0)} payloads · ${fmtN(T.block || 0)} blocked · ${fmtN(T.ban || 0)} bans${T.check ? ` · ${fmtN(T.check)} held for a check` : ""}</div></div>
-      <div class="card stat"><b>${fmtN(o.bans)}</b><span>banned now</span><div class="sub">${fmtN(T.newIp || 0)} new addresses · ${fmtN((T.payload || 0) + (T.probe || 0))} attack requests from strangers</div></div>
-      <div class="card stat ${strict ? "warm" : ""}"><b>${o.latency ? fmtN(o.latency.p95) + '<span class="faint" style="font-size:15px"> ms</span>' : "–"}</b><span>to categorize a new address <span class="faint">(p95)</span></span>
+    <section class="hero st-${st.k}">
+      <div class="hero-shield">${SHIELD}<i class="ring"></i></div>
+      <div class="hero-txt">
+        <span class="kicker">${hosts ? `Guarding ${hosts}` : "Bulwark"}${strict ? ' · <b class="strict">strict mode</b>' : ""}</span>
+        <h2>${h(st.title)}</h2>
+        <p>${h(st.line)}</p>
+        <div class="hero-nums"><span><b>${fmtN(T.req || 0)}</b> checked</span><span class="hot"><b>${fmtN(bad)}</b> stopped</span><span><b>${fmtN(o.bans)}</b> banned now</span></div>
+        <div class="hero-acts">${st.k !== "calm" ? '<a class="btn primary sm" href="#/waves">See the wave</a>' : ""}<a class="btn sm" href="#/log">Live log</a><a class="btn sm ghost" href="#/inspect">Inspect an address</a></div>
+      </div>
+      <div class="hero-right"><span class="faint small">stopped, ${h(S.span)}</span>${heroSpark(S.series)}</div>
+    </section>
+    <div class="grid g4 stats">
+      <div class="card stat"><i class="si">${icon("list")}</i><b>${fmtN(T.req || 0)}</b><span>requests</span><div class="sub">${fmtB(T.bytes || 0)} · ${fmtN(o.tops.seen)} addresses</div></div>
+      <div class="card stat ${bad ? "hot" : ""}"><i class="si">${icon("ban")}</i><b>${fmtN(bad)}</b><span>stopped</span><div class="sub">${fmtN(T.drop || 0)} payloads · ${fmtN(T.block || 0)} blocked · ${fmtN(T.ban || 0)} bans${T.check ? ` · ${fmtN(T.check)} checked first` : ""}</div></div>
+      <div class="card stat"><i class="si">${icon("shield")}</i><b>${fmtN(o.bans)}</b><span>banned now</span><div class="sub">${fmtN(T.newIp || 0)} new addresses · ${fmtN((T.payload || 0) + (T.probe || 0))} attacks from strangers</div></div>
+      <div class="card stat ${strict ? "warm" : ""}"><i class="si">${icon("search")}</i><b>${o.latency ? fmtN(o.latency.p95) + '<span class="unit"> ms</span>' : "–"}</b><span>to size up a new address <span class="faint">(p95)</span></span>
         <div class="sub">${o.latency ? `median ${o.latency.p50} ms · ` : ""}${fmtN(o.stats.checked)} looked up${strict ? " · STRICT" : ""}</div></div>
     </div>
-    <section class="card" style="margin-bottom:14px"><h3>Traffic <span class="faint">by what happened</span></h3><div id="cTraffic"></div>
-      <div class="legend"><span><i style="background:#3d4450"></i>through</span><span><i style="background:#f2b53c"></i>payload dropped</span><span><i style="background:#ff5a52"></i>blocked</span><span><i style="background:#e040fb"></i>banned</span><span><i style="background:#7aa7ff"></i>held for a check</span><span><i style="background:#46c2ff"></i>new addresses (right axis)</span></div></section>
-    <section class="card" style="margin-bottom:14px"><h3>Attack patterns <span class="faint">over time</span></h3><div id="cHeat"></div></section>
-    <section class="card" style="margin-bottom:14px"><h3>What they're after <span class="faint">attack requests from strangers, by category</span></h3>${o.tops.cats?.length ? catBars(o.tops.cats) : '<p class="empty">No attacks in this window.</p>'}</section>
-    <div class="grid g3" style="margin-bottom:14px">
-      <section class="card"><h3>Patterns <span class="faint">(attack requests)</span></h3>${o.tops.sigs.length ? bars(o.tops.sigs, (r) => `${catPill(r.cat)} ${h(r.name)}${r.cve ? ` <span class="faint mono small">${h(r.cve)}</span>` : ""}`, (r) => r.n, (r) => "s" + r.score) : '<p class="empty">No attacks in this window.</p>'}</section>
-      <section class="card"><h3>Networks <span class="faint">(strangers' requests)</span></h3>${o.tops.orgs.length ? bars(o.tops.orgs, (r) => `${h(r.org)} <span class="faint mono">AS${r.asn}</span>${r.dc ? ' <span class="pill dc">hosting</span>' : ""}`, (r) => r.n, (r) => (r.dc ? "dc" : "")) : '<p class="empty">–</p>'}</section>
-      <section class="card"><h3>Countries <span class="faint">(strangers' addresses)</span></h3>${o.tops.countries.length ? bars(o.tops.countries, (r) => `${flag(r.cc)} ${h(r.cc)}`, (r) => r.n) : '<p class="empty">–</p>'}</section>
+    <section class="card"><h3>Traffic <span class="faint">by what happened</span></h3><div id="cTraffic"></div>
+      <div class="legend"><span><i style="background:var(--pass)"></i>through</span><span><i style="background:var(--drop)"></i>payload dropped</span><span><i style="background:var(--block)"></i>blocked</span><span><i style="background:var(--ban)"></i>banned</span><span><i style="background:var(--known)"></i>checked first</span><span><i style="background:var(--new)"></i>new addresses (right axis)</span></div></section>
+    <div class="grid g2">
+      <section class="card"><h3>What they're after <span class="faint">by category</span>${cats.length > CATS ? `<button class="lnk" data-act="cats-all">${S.catsAll ? "Fewer" : `All ${cats.length}`}</button>` : ""}</h3>${cats.length ? catBars(S.catsAll ? cats : cats.slice(0, CATS)) : '<p class="empty">No attacks in this window.</p>'}</section>
+      <section class="card"><h3>Just stopped <span class="faint">the latest, live</span><a class="lnk" href="#/log">Live log</a></h3>${justStopped()}</section>
+    </div>
+    <section class="card"><h3>Attack patterns <span class="faint">over time</span><button class="lnk" data-act="heat-all" id="heatAll" hidden></button></h3><div id="cHeat"></div></section>
+    <div class="grid g3">
+      <section class="card"><h3>Patterns <span class="faint">(attack requests)</span></h3>${o.tops.sigs.length ? bars(o.tops.sigs.slice(0, 10), (r) => `${catPill(r.cat)} ${h(r.name)}${r.cve ? ` <span class="faint mono small">${h(r.cve)}</span>` : ""}`, (r) => r.n, (r) => "s" + r.score) : '<p class="empty">No attacks in this window.</p>'}</section>
+      <section class="card"><h3>Networks <span class="faint">(strangers' requests)</span></h3>${o.tops.orgs.length ? bars(o.tops.orgs.slice(0, 10), (r) => `${h(r.org)} <span class="faint mono">AS${r.asn}</span>${r.dc ? ' <span class="pill dc">hosting</span>' : ""}`, (r) => r.n, (r) => (r.dc ? "dc" : "")) : '<p class="empty">–</p>'}</section>
+      <section class="card"><h3>Countries <span class="faint">(strangers' addresses)</span></h3>${o.tops.countries.length ? bars(o.tops.countries.slice(0, 10), (r) => `${flag(r.cc)} ${h(r.cc)}`, (r) => r.n) : '<p class="empty">–</p>'}</section>
     </div>
     <div class="grid g21">
       <section class="card"><h3>Busiest strangers</h3>${o.tops.ips.length ? `<div class="scroll"><table><thead><tr><th>Address</th><th>Network</th><th>Requests</th><th>Patterns</th><th></th></tr></thead><tbody>
         ${o.tops.ips.map((p) => `<tr class="click" data-act="ip" data-ip="${h(p.ip)}"><td>${ipBtn(p.ip, p.cc)}</td><td class="why">${h(p.org || "–")}${p.dc ? ' <span class="pill dc">hosting</span>' : ""}</td><td class="mono">${fmtN(p.n)}</td><td class="mono">${p.sigs || ""}</td><td>${p.banned ? '<span class="pill ban">banned</span>' : ""}</td></tr>`).join("")}</tbody></table></div>` : '<p class="empty">Nobody yet.</p>'}</section>
-      <section class="card"><h3>What Bulwark did</h3>${o.actions.length ? `<div class="scroll" style="max-height:420px"><table><tbody>${o.actions.slice(0, 30).map((a) => `<tr class="click" data-act="ip" data-ip="${h(a.ip)}"><td class="faint mono">${ago(a.t)}</td><td><span class="pill ${a.act === "banned" ? "ban" : a.act === "lifted" || a.act === "unbanned" || a.act === "trusted" ? "ok" : ""}">${h(a.act)}</span></td><td>${ipBtn(a.ip, a.cc)}</td><td class="why" title="${h(a.why)}">${h(a.why)}</td></tr>`).join("")}</tbody></table></div>` : '<p class="empty">Quiet.</p>'}</section>
+      <section class="card"><h3>What Bulwark did</h3>${o.actions.length ? `<div class="scroll" style="max-height:420px"><table><tbody>${o.actions.slice(0, 30).map((a) => `<tr class="click" data-act="ip" data-ip="${h(a.ip)}"><td class="faint mono">${ago(a.t)}</td><td><span class="pill ${a.act.startsWith("banned") ? "ban" : a.act === "lifted" || a.act === "unbanned" || a.act === "trusted" ? "ok" : ""}">${h(a.act)}</span></td><td>${ipBtn(a.ip, a.cc)}</td><td class="why" title="${h(a.why)}">${h(a.why)}</td></tr>`).join("")}</tbody></table></div>` : '<p class="empty">Quiet.</p>'}</section>
     </div>`;
-  charts.traffic = new TimeChart($("#cTraffic"), { height: 300,
-    series: [{ key: "pass", label: "through", color: "#3d4450" }, { key: "drop", label: "payload dropped", color: "#f2b53c" }, { key: "block", label: "blocked", color: "#ff5a52" }, { key: "ban", label: "banned", color: "#e040fb" }, { key: "check", label: "held for a check", color: "#7aa7ff" }],
+  charts.traffic = new TimeChart($("#cTraffic"), { height: 280,
+    series: [{ key: "pass", label: "through", color: "#4a4440" }, { key: "drop", label: "payload dropped", color: "#f2b53c" }, { key: "block", label: "blocked", color: "#ff5a52" }, { key: "ban", label: "banned", color: "#e040fb" }, { key: "check", label: "checked first", color: "#8b7bff" }],
     line: { key: "newIp", label: "new addresses", color: "#46c2ff" } });
   charts.traffic.set(S.series);
-  const rows = (S.sigRows ||= null);
   drawHeat($("#cHeat"), S.series);
+}
+// the latest stopped requests, newest first: when, what Bulwark did, who, what they tried
+function justStopped() {
+  const L = (S.recent || []).slice(0, 9);
+  if (!L.length) return '<p class="empty">Nothing stopped lately.</p>';
+  return `<div class="feed">${L.map((e) => { const sig = sigOf(e.sig);
+    return `<a href="#" class="feed-row" data-act="ip" data-ip="${h(e.ip)}"><span class="feed-dec">${decPill(e.dec)}</span>
+      <span class="feed-main"><b>${sig ? h(sig.name) : e.why ? h(e.why) : "–"}</b><span class="mono">${h((e.path || "").slice(0, 80))}</span></span>
+      <span class="feed-who"><span class="feed-ip">${flag(e.cc)} <span class="mono">${h(e.ip)}</span></span><em>${ago(e.t)}</em></span></a>`; }).join("")}</div>`;
 }
 function drawHeat(el, series) {
   const seen = new Map();
   for (const p of series.points) for (const [id, n] of Object.entries(p.sig || {})) seen.set(id, (seen.get(id) || 0) + n);
   const sigs = (S.sigs || []).filter((s) => seen.has(s.id)).sort((a, b) => b.score - a.score || seen.get(b.id) - seen.get(a.id));
   if (!sigs.length) { el.innerHTML = '<p class="empty">No attack patterns in this window. When they come, each kind gets a row here.</p>'; return; }
-  charts.heat = new Heatmap(el, { height: Math.min(420, 30 + sigs.length * 24) });
-  charts.heat.set(series, sigs);
+  const TOP = 12, shown = S.heatAll ? sigs : sigs.slice(0, TOP), more = $("#heatAll");
+  if (more) { more.hidden = sigs.length <= TOP; more.textContent = S.heatAll ? "Top 12" : `All ${sigs.length}`; }
+  charts.heat = new Heatmap(el, { height: Math.min(S.heatAll ? 900 : 420, 30 + shown.length * 24) });
+  charts.heat.set(series, shown);
 }
 
 // ------------------------------------------------------------------ live log
@@ -139,14 +183,16 @@ function logRow(e) {
   return `<tr class="click d-${h(e.dec)} ${S.newIds.has(e.id) ? "new" : ""}" data-act="logrow" data-id="${e.id}">
     <td class="faint mono">${clock(e.t)}</td><td>${decPill(e.dec)}</td><td>${ipBtn(e.ip, e.cc)}${e.dc ? ' <span class="pill dc">hosting</span>' : ""}${e.dev ? ` <span class="pill ok dev" title="${h(devName(e.dev))}: recognized by its device key">${h(devName(e.dev))}</span>` : e.auth ? ' <span class="pill ok">you</span>' : ""}</td>
     <td class="mono">${h(e.m)}</td><td class="mono path" title="${h(e.path)}"><span class="faint">${h((e.host || "").split(".")[0])}</span>${h(e.path)}</td>
-    <td class="mono st${String(e.st || 0)[0]}">${e.st || "–"}</td><td class="mono faint">${e.ms != null ? e.ms + "ms" : ""}</td>
+    <td class="mono st${String(e.st || 0)[0]}">${e.st || "–"}</td><td class="mono faint">${e.ms != null ? Math.round(e.ms) + " ms" : ""}</td>
     <td class="nowrap" title="${h(e.sig ? `${sigOf(e.sig)?.name || e.sig}${e.cve ? ` · ${e.cve}` : ""}` : "")}">${e.sig ? (catPill(e.cat || sigOf(e.sig)?.cat) || `<span class="sigid ${e.sc === 3 ? "pay" : ""}">${h(e.sig)}</span>`) : ""}</td><td class="why" title="${h(e.org || "")}">${h(e.org || "")}</td></tr>
     ${S.open === e.id ? `<tr class="logdetail"><td colspan="9">${logDetail(e)}</td></tr>` : ""}`;
 }
 function logDetail(e) {
   const kv = [["Time", new Date(e.t).toISOString()], ["Address", `${e.ip} ${e.cc ? "· " + e.cc : ""}`], ["Network", e.asn ? `AS${e.asn} ${e.org || ""}${e.dc ? " (hosting)" : ""}` : "–"],
-    ["Host", `${e.host || "–"}${e.port ? ` (tunnel ${e.port})` : e.main ? " (dashboard)" : ""}`], ["Request", `${e.m} ${e.path}`], ["Status", `${e.st || "–"} · ${fmtB(e.b || 0)}${e.ms != null ? ` · ${e.ms} ms` : ""}${e.ws ? " · WebSocket" : ""}`],
-    ["Decision", `${DEC[e.dec]?.[1] || e.dec}${e.why ? ` · ${e.why}` : ""}`], ["Pattern", e.sig ? { html: `${catPill(e.cat || sigOf(e.sig)?.cat, true)} ${sevPill(e.sev || sigOf(e.sig)?.sev)} <b>${h(sigOf(e.sig)?.name || e.sig)}</b> <span class="faint mono">${h(e.sig)}</span> · ${e.sc === 3 ? "a payload" : sigOf(e.sig)?.sev === "info" ? "a label" : "a probe"}${e.pts ? ` · ${e.pts} points` : ""}${e.cve ? ` · ${cveLink(e.cve)}` : ""}` } : "–"],
+    ["Host", `${e.host || "–"}${e.port ? ` (tunnel ${e.port})` : e.main ? " (dashboard)" : ""}`], ["Request", `${e.m} ${e.path}`], ["Status", `${e.st || "–"} · ${fmtB(e.b || 0)}${e.ms != null ? ` · ${Math.round(e.ms)} ms` : ""}${e.ws ? " · WebSocket" : ""}`],
+    ["Decision", `${DEC[e.dec]?.[1] || e.dec}${e.why ? ` · ${e.why}` : ""}`],
+    ["In plain words", e.expl || (e.dec === "pass" ? "Passed: nothing against it." : "–")],
+    ...(e.crowd ? [["Judged as", `one client of about ${e.crowd} behind a shared address (not the address)${e.ck ? ` · client ${e.ck}` : ""}`]] : []), ["Pattern", e.sig ? { html: `${catPill(e.cat || sigOf(e.sig)?.cat, true)} ${sevPill(e.sev || sigOf(e.sig)?.sev)} <b>${h(sigOf(e.sig)?.name || e.sig)}</b> <span class="faint mono">${h(e.sig)}</span> · ${e.sc === 3 ? "a payload" : sigOf(e.sig)?.sev === "info" ? "a label" : "a probe"}${e.pts ? ` · ${e.pts} points` : ""}${e.cve ? ` · ${cveLink(e.cve)}` : ""}` } : "–"],
     ...(e.hits?.length ? [["All hits", { html: e.hits.map((x) => `${catPill(sigOf(x)?.cat)} <span class="mono small">${h(x)}</span>`).join(" &nbsp;") }]] : []), ...(e.det ? [["Why", e.det]] : []), ["Lists", (e.lists || []).join(", ") || "–"],
     ["User agent", e.ua || "–"], ["Referer", e.ref || "–"], ["Language", e.lang || "–"], ["Came via", `${e.via || "–"}${e.ray ? ` · ray ${e.ray}` : ""}${e.proto ? ` · HTTP/${e.proto}` : ""}`],
     ["Signed in", e.auth === undefined ? "not checked" : e.auth ? "yes" : "no"], ["Device", e.dev ? `${devName(e.dev)} (its device key)` : "not one of yours, or never signed in"], ["Log id", `#${e.id}${e.src ? ` · from ${e.src === "aegis-burrow" ? "Aegis's" : "the host's"} history` : ""}`]];
@@ -422,7 +468,9 @@ async function renderSettings() {
         ${sw("drop", "Drop payloads", "/.env, /.git, ../../etc/passwd, phpunit, ${jndi:…} get a 404 and never reach the app.")}
         ${sw("lookups", "Look up every new address", "Behind the request, never in its way: Spamhaus, DroneBL, StopForumSpam, GreyNoise for probes. Known services (search engines, scrapers) are left alone.")}
         ${sw("strict", "Strict mode during critical waves", "While a critical wave is on, a first payload bans.")}
-        ${sw("scanFirst", "Scan before public tunnels", "Someone new gets a \"checking your connection\" page until their address is scanned (about a second; it reloads by itself), and only then the tunnel. With your VPS in front, they never reach this machine before that. Yours (signed in, your devices) pass at once.")}</section>
+        ${sw("scanFirst", "Scan before public tunnels", "Someone new gets a \"checking your connection\" page until their address is scanned (about a second; it reloads by itself), and only then the tunnel. With your VPS in front, they never reach this machine before that. Yours (signed in, your devices) pass at once.")}
+        <label class="field"><span>Shared networks: a school's, an office's (addresses or networks like 203.0.113.0/24). Bulwark finds most shared addresses by itself (many browsers behind one); these are judged client by client from the first request, and one person's attack never bans the rest.</span><textarea class="input mono" id="sShared" rows="2" placeholder="203.0.113.0/26 198.51.100.7">${h(s.sharedNets || "")}</textarea></label>
+        <button class="btn" data-act="saveshared">Save shared networks</button></section>
       <section class="card"><h3>Alerts &amp; logs</h3>
         <label class="field"><span>ntfy topic URL (push to your phone: ntfy.sh/your-secret-topic)</span><input class="input mono" id="sNtfy" value="${h(s.ntfy)}" placeholder="https://ntfy.sh/…"></label>
         <label class="field"><span>Webhook (JSON POST for every wave)</span><input class="input mono" id="sHook" value="${h(s.webhook)}" placeholder="https://…"></label>
@@ -543,7 +591,7 @@ function drawIp() {
   const v = S.ip, p = v.profile, a = v.asn, i = v.intel || {}, o = i.owner || {};
   const verdict = i.verdict ? `<span class="pill ${i.verdict.level === "malicious" ? "block" : i.verdict.level === "suspicious" ? "drop" : i.verdict.level === "clean" ? "ok" : ""}">${h(i.verdict.level)}</span>` : "";
   $("#drawerIn").innerHTML = `
-    <div class="row"><h2>${flag(p?.cc || a?.cc)} ${h(v.ip)}</h2>${verdict}${v.ban ? '<span class="pill ban">banned</span>' : ""}${v.devices?.length ? '<span class="pill ok">your device</span>' : v.trusted ? '<span class="pill ok">yours</span>' : ""}${v.own ? '<span class="pill drop">this machine</span>' : ""}${v.allowed ? '<span class="pill ok">allowed</span>' : ""}<span class="spacer"></span><button class="btn sm ghost" data-act="closedrawer">✕</button></div>
+    <div class="row"><h2>${flag(p?.cc || a?.cc)} ${h(v.ip)}</h2>${verdict}${v.ban ? '<span class="pill ban">banned</span>' : ""}${v.shared ? `<span class="pill" title="Judged client by client: one client's attack bans that client, not the address">shared${v.shared.n ? ` · ${v.shared.n} clients` : ""}</span>` : ""}${v.devices?.length ? '<span class="pill ok">your device</span>' : v.trusted ? '<span class="pill ok">yours</span>' : ""}${v.own ? '<span class="pill drop">this machine</span>' : ""}${v.allowed ? '<span class="pill ok">allowed</span>' : ""}<span class="spacer"></span><button class="btn sm ghost" data-act="closedrawer">✕</button></div>
     <div class="muted">${h([a ? `AS${a.asn} ${a.name}` : o.org, o.city, a?.cc || o.country].filter(Boolean).join(" · "))}${a?.hosting ? ' <span class="pill dc">hosting</span>' : ""}${o.hostname ? ` <span class="mono faint">${h(o.hostname)}</span>` : ""}</div>
     ${i.verdict?.why?.length ? `<div class="row">${i.verdict.why.map((w) => `<span class="pill">${h(w)}</span>`).join("")}</div>` : ""}
     <div class="row">${v.ban ? `<button class="btn" data-act="unban" data-ip="${h(v.ip)}">Unban</button>` : `<button class="btn danger" data-act="ban" data-ip="${h(v.ip)}">Ban</button>`}
@@ -553,6 +601,7 @@ function drawIp() {
     ${catsOfProfile(p).length ? `<div class="row">${catsOfProfile(p).map(([c, n]) => `${catPill(c, true).replace("</span>", ` ×${n}</span>`)}`).join("")}${(p.cves || []).map(cveLink).join("")}</div>` : ""}
     ${v.devices?.length ? `<section class="card"><h3>Your devices on it</h3>${v.devices.map((d) => `<div class="row"><a href="#/devices" class="dev-link">${ICONS.device}${h(d.name)}</a><span class="faint small">${ago(d.last)}</span></div>`).join("")}<p class="faint small" style="margin:8px 0 0">Recognized by their device keys, so this address is trusted and never banned automatically.</p></section>` : ""}
     ${v.ban ? `<section class="card"><h3>Banned</h3><dl class="kv"><dt>Why</dt><dd>${h(v.ban.reason)}</dd><dt>By</dt><dd>${h(v.ban.source)}</dd><dt>Since</dt><dd>${new Date(v.ban.at).toLocaleString()}</dd><dt>Until</dt><dd>${v.ban.until ? new Date(v.ban.until).toLocaleString() : "for good"}</dd><dt>Turned away</dt><dd>${fmtN(v.ban.hits || 0)} requests since</dd>${v.ban.lines?.length ? `<dt>Evidence</dt><dd class="mono">${v.ban.lines.map(h).join("<br>")}</dd>` : ""}</dl></section>` : ""}
+    ${v.clientBans?.length ? `<section class="card"><h3>Clients banned behind it <span class="faint">not the address</span></h3><div class="scroll" style="max-height:260px"><table><tbody>${v.clientBans.map((b) => `<tr><td class="faint mono nowrap">${ago(b.at)}</td><td class="why" title="${h(b.ua || "")}">${h(b.ua || b.key)}</td><td class="why" title="${h(b.reason)}">${h(b.reason)}</td><td class="faint nowrap">until ${new Date(b.until).toLocaleTimeString()}</td></tr>`).join("")}</tbody></table></div><p class="faint small" style="margin:8px 0 0">${v.shared?.marked ? "A network you marked as shared" : `About ${v.shared?.n || "several"} clients use this address`}: each is judged on its own. Unban lets these go too.</p></section>` : ""}
     <section class="card"><h3>Who knows it <span class="faint">vendors</span></h3><div class="cov">${v.coverage.map((c) => `<div class="${c.knows ? "k" : v.ban ? "miss" : ""}"><span>${h(c.vendor)}</span><span class="pill ${c.knows ? "ok" : ""}" title="${h(c.how)}">${c.knows ? "knows" : "missed"}</span></div>`).join("")}</div></section>
     ${p ? `<section class="card"><h3>Here</h3><dl class="kv"><dt>First seen</dt><dd>${new Date(p.first).toLocaleString()}</dd><dt>Last seen</dt><dd>${ago(p.last)}</dd><dt>Requests</dt><dd>${fmtN(p.n)} · ${fmtB(p.bytes)}</dd>
       <dt>What happened</dt><dd>${Object.entries(p.dec).map(([d, n]) => `${decPill(d)} ${n}`).join(" ")}</dd><dt>Patterns</dt><dd>${Object.entries(p.sigs).map(([s, n]) => `<span class="pill" style="border-color:${h(catOf(sigOf(s)?.cat)?.color || "")}55" title="${h(sigOf(s)?.name || s)}">${h(s)} ×${n}</span>`).join(" ") || "none"}</dd>
@@ -848,6 +897,8 @@ document.addEventListener("click", async (e) => {
   if (el.tagName === "A") e.preventDefault();
   try {
     if (act === "span") { S.span = el.dataset.v; localStore("span", S.span); await loadOverview(); renderOverview(); }
+    else if (act === "cats-all") { S.catsAll = !S.catsAll; renderOverview(); }
+    else if (act === "heat-all") { S.heatAll = !S.heatAll; drawHeat($("#cHeat"), S.series); }
     else if (act === "gspan") { S.gspan = el.dataset.v; charts.flow?.destroy?.(); charts.flow = null; await renderPatterns(); }
     else if (act === "patpick") {
       // on the graph: pick it there (the panel has everything); a campaign or a folded pattern: the list
@@ -900,6 +951,7 @@ document.addEventListener("click", async (e) => {
       try { const r = await post("email/test"); toast(`Sent${r.to ? " to " + r.to : ""}`); } finally { el.disabled = false; el.innerHTML = was; }
       if (S.view === "settings") await renderSettings();
     }
+    else if (act === "saveshared") { await api("settings", { method: "PUT", body: JSON.stringify({ sharedNets: $("#sShared").value }) }); toast("Saved"); await renderSettings(); }
     else if (act === "savealerts") { await api("settings", { method: "PUT", body: JSON.stringify({ ntfy: $("#sNtfy").value, webhook: $("#sHook").value, keepDays: Number($("#sKeep").value) }) }); toast("Saved"); }
   } catch (ex) { toast(ex.message); }
 });

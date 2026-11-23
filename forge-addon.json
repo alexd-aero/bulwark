@@ -2,7 +2,7 @@
   "spec": 1,
   "id": "bulwark",
   "name": "Bulwark",
-  "version": "2.0.5",
+  "version": "3.0.0",
   "description": "A shield for everything you publish. Every request is decoded and judged in microseconds by an attack engine with 22 categories and 91 known CVE exploits that reads every header, scored CRS-style with per-address behaviour, and checked against 250k+ blocklisted addresses; attackers are banned on every tunnel at once. Its own dashboard shows every request in full, warns about waves, graphs the patterns, inspects any IP across a dozen free sources and reports attackers to the vendors that missed them. With the selfmail addon, it emails you about waves too.",
   "author": "Alexd Aero",
   "license": "MIT",
@@ -12,14 +12,14 @@
     "theme": "red",
     "icon": "shield",
     "style": "glow",
-    "badge": "FIXES",
+    "badge": "NEW",
     "title": "{name} {version}",
-    "tagline": "Schools and homes share one address: a ban earned by odd traffic alone now lasts an hour, not a month.",
+    "tagline": "A new dashboard and a new engine: people behind one shared address are judged one by one, and every decision says why in plain English.",
     "highlights": [
-      "A ban from a score alone (no attack payload) lasts 1 hour",
-      "Real payloads and blocklisted attackers still get 30 days",
-      "Fixes a school address banned a month for Google Docs' long tracking URLs",
-      "Scanners are still stopped the moment they score"
+      "Ember: an overview that says how things stand at a glance",
+      "Schools and carriers: each visitor behind a shared address is judged on their own",
+      "New attack families: forged tokens, GraphQL abuse, request smuggling, path and host tricks",
+      "Credential-stuffing campaigns spotted across addresses; refused sign-ins keep pages strict"
     ],
     "button": "Update to {version}",
     "notes": "https://github.com/alexd-aero/bulwark/commits/main"

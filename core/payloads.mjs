@@ -7,13 +7,15 @@
 //                  and, for a published exploit, its CVE; run on the path, the
 //                  query and the User-Agent / Referer where they belong
 //   3. lexers      SQL injection and XSS judged by shape, value by value
-//                  (lexers.mjs), plus SSRF, Log4Shell lookups, deserialization
-//                  and protocol anomalies (methods, proxy probes, CRLF, sizes)
+//                  (lexers.mjs), plus SSRF, Log4Shell lookups, deserialization,
+//                  forged tokens (JWT), GraphQL built to exhaust a server, and
+//                  protocol anomalies (methods, proxy probes, CRLF, sizes); the
+//                  headers too (detect.mjs: smuggling, host headers, Next.js)
 //   4. score       CRS-style anomaly scoring: every distinct hit adds its
 //                  severity's points; 5 or more is a payload (dropped). Evasion
 //                  that hid a hit adds to it
 //
-// inspect({method, path, ua, referer, lang}) -> {score, id, name, cat, sev, pts,
+// inspect({method, path, ua, referer, headers, proto, host}) -> {score, id, name, cat, sev, pts,
 // hits, cve, det, label}. score keeps the old meaning: 3 a payload, 1 a probe or a
 // label, 0 nothing. label: only informational hits (a scanner's name), which
 // never count against an address. Results are cached per path and per
@@ -27,7 +29,7 @@ import { SEVERITY, DROP_AT, categoryById, sevPoints, sevRank } from "./taxonomy.
 
 // Raised whenever the signatures learn something: the app then reads its log
 // again with them (Brain.rescan), so what slipped past before is caught now.
-export const SIGNATURES_VERSION = 5;
+export const SIGNATURES_VERSION = 6;
 
 // in: where it is looked for. path: the path only (decoded, collapsed and as
 // sent); url: the path and the query; query: the query values only.
@@ -89,6 +91,7 @@ export const SIGNATURES = [
   S("papercut", "PaperCut setup bypass", "cve", "critical", { cve: "CVE-2023-27350" }, /\/app\?service=page\/setupcompleted/i),
   S("checkpoint-leak", "Check Point gateway file read", "cve", "critical", { cve: "CVE-2024-24919" }, /\/clients\/mycrl\b/i),
   S("vite-fs", "Vite dev server file read", "cve", "critical", { cve: "CVE-2025-30208" }, /\/@fs\//i, /[?&](raw|import|inline)[^&]*\?\?|\?raw\?\?|[?&]inline=1\.wasm/i),
+  S("vite-fs2", "Vite dev server file read (.svg?.wasm?init, ?import&?raw)", "cve", "critical", { cve: "CVE-2025-31486" }, /\?[^#]*\.wasm\?init/i, /[?&]import&\?(raw|inline|url)\b/i),
   S("jenkins-rce", "Jenkins CLI / script console", "cve", "critical", { cve: "CVE-2024-23897" }, /\/jenkins\/script(text)?\/?$/i, /^\/cli\?remoting=false/i, /\/descriptorbyname\/org\.jenkinsci\.plugins\.(scriptsecurity|workflow)\./i, /\/(script|scripttext)\?(script|command)=/i),
   S("crushftp", "CrushFTP template injection / auth bypass", "cve", "critical", { cve: "CVE-2024-4040" }, /\/webinterface\/function\/\?.*(c2f=|\{working_dir\}|<include>)/i),
   S("vmware-aria", "VMware Aria / vRealize RCE", "cve", "critical", { cve: "CVE-2023-20887" }, /\/saas\.\/resttosaasservlet/i, /\/casa\/nodes\/thumbprints/i),
@@ -190,7 +193,9 @@ export const SIGNATURES = [
     /([;|&`]|\$\()\s*(sleep\s+\d|ping\s+-[cn]\s*\d|nslookup\s+\S+\.\S+)/i, /\b(bash|sh)\s+-[ci]\s+['"]?[^'"]*\b(wget|curl|\/dev\/tcp)/i, /\/dev\/tcp\/\d/i),
   S("rce", "remote code execution", "rce", "critical", /[?&](cmd|exec|execute|command|shell|run|system|passthru|cmdline)=\s*(wget|curl|id|uname|whoami|cat|ls|pwd|ifconfig|nc|bash|sh|powershell|cmd|echo|ping)(\b|$)/i,
     /[?&](ping|host|ip|addr|target)=[^&]*[;|`]\s*\w/i, /(^|[^a-z0-9])ognl([^a-z0-9]|$)/i, /\/bin\/(ba|z|da|k)?sh\b/i, /xdebug_session_start/i, /\/ws\/v1\/cluster\/apps\/new-application/i),
-  S("proto-pollution", "prototype pollution", "rce", "critical", Q, /(^|[&\[.=])(__proto__|constructor\s*\[\s*prototype|constructor\.prototype)\b/i),
+  // as a key (?__proto__[x]=1), as a JSON key in a value, or as a route's segments (/api/__proto__/isAdmin)
+  S("proto-pollution", "prototype pollution", "rce", "critical", { in: "query", pathOnly: [/(^|\/)__proto__(\/|$)/i, /(^|\/)constructor\/prototype(\/|$)/i] },
+    /(^|[&\[.=])(__proto__|constructor\s*\[\s*prototype|constructor\.prototype)\b/i, /["']__proto__["']\s*:|["']constructor["']\s*:\s*\{\s*["']prototype["']\s*:/i),
   S("ssti", "template injection (code)", "ssti", "critical", /__class__\s*\.\s*__(mro|bases?|subclasses)__|__globals__|__builtins__|__import__\s*\(/i,
     /\{\{[^}]{0,120}(\.popen\(|\.items\(\)|\[\s*['"]__|\|\s*attr\s*\(|_self\.env\.|\.__init__)/i, /freemarker\.template\.utility\.(execute|objectconstructor|jythonruntime)/i,
     /\bt\s*\(\s*java\.lang\.(runtime|system|processbuilder)/i, /__\$\{[^}]{1,200}\}__/, /\$class\.inspect|\.getclass\(\)\.forname\(/i, /<%=\s*(`|system|exec|io\.popen|%x)/i,
@@ -217,6 +222,14 @@ export const SIGNATURES = [
     /\/(_cat\/indices|_all\/_search|_cluster\/health|_nodes)/i, /\/debug\/(pprof|vars)/i, /\/(metrics\/v1|v1\/metadata|computemetadata|latest\/(meta-data|user-data|api\/token)|metadata\/(instance|v1))/i, /\/(run|exec|runningpods)\/[\w-]+\/[\w-]+/i),
   S("edge-exploit", "VPN & firewall exploits", "cve", "critical", /\/remote\/fgt_lang/i, /\/\+CSCOE\+\//i, /\/mifs\//i, /\/webui\/logoutconfirm/i, /\/api\/v2\/cmdb\//i,
     /\/(owa\/auth\/x\.js|autodiscover\/autodiscover\.json\?.*powershell)/i, /\/(vpn|dana-na|dana-cached)\/.*\.\./i, /\/(ssl-vpn|sslvpn)\/.*(\.\.|%2e)/i),
+  // ---- path tricks: what a front end and the app behind read differently --------------------------
+  // A browser resolves ./ and %2e before it sends a path, and puts ;params after a name: a segment
+  // that is only "." or starts with ";" comes from a tool getting past a rule on /admin
+  S("path-confusion", "path tricks that get past a front end's rules (/;/, /./, /%2e/)", "protocol", "high", P, /(^|\/);[^/?]*\//, /(^|\/)\.(;[^/]*)?(\/|$)/),
+  // nginx's alias without a trailing slash: /static../ reaches the folder above
+  S("alias-traversal", "alias traversal (off-by-slash: /static../)", "traversal", "high", P, /(^|\/)[\w-]+\.\.\//),
+  // /account;x.css, /account%3fx.js: a cache in front keeps someone's page as a static file, for anyone
+  S("cache-deception", "web cache deception (a dynamic page dressed as a static file)", "protocol", "high", P, /(?:;|%3[bf]|%23|%00|%0[ad]|\?|#)[^/?#]{0,24}\.(?:css|js|png|jpe?g|gif|ico|svg|webp|avif|woff2?|ttf)$/i),
   // ---- probes: asking for software that isn't here ------------------------------------------------
   S("secret-probe", "config & build files a site may serve", "secrets", "medium", { in: "path", probe: true }, /^\/(config|settings|app\.config|runtime-config|env-config|env|aws-exports|firebase-config|constants|secrets?)\.(js|json|txt)$/i, /^\/config\/config\.js$/i,
     /(^|\/)(composer|package|bower)(-lock)?\.(json|lock)$/i, /(^|\/)(dockerfile|vagrantfile|makefile|gemfile(\.lock)?|requirements\.txt|go\.mod|cargo\.toml|\.gitignore|\.dockerignore|\.dockerenv|\.editorconfig|\.php_cs(\.cache|\.dist)?|\.eslintrc(\.json)?)$/i,
@@ -257,6 +270,12 @@ export const DYNAMIC = [
   S("access-bypass", "URL-override headers (X-Original-URL)", "protocol", "medium"),
   S("ip-spoof", "a forged client address (X-Forwarded-For: 127.0.0.1)", "protocol", "medium"),
   S("default-creds", "default credentials (admin:admin)", "bruteforce", "high"),
+  S("jwt-attack", "forged or tampered tokens (JWT alg none, kid, jku / x5u, jwk)", "auth", "critical"),
+  S("graphql-abuse", "GraphQL abuse (nesting, aliases, batching, directives)", "dos", "high"),
+  S("host-header", "Host header injection & cache poisoning", "protocol", "high"),
+  S("nextjs-cache-poison", "Next.js cache poisoning (x-now-route-matches)", "cve", "critical", { cve: "CVE-2024-46982" }),
+  S("nextjs-rsc", "React Server Components exploit probe (React2Shell)", "cve", "high", { cve: "CVE-2025-55182" }),
+  S("nextjs-ssrf", "Next.js middleware SSRF (a Location header in a request)", "cve", "high", { cve: "CVE-2025-57822" }),
   S("httpsys-range", "HTTP.sys Range overflow (MS15-034)", "cve", "critical", { cve: "CVE-2015-1635" }),
   S("log4shell", "Log4Shell / JNDI lookup", "log4shell", "critical"),
   S("header-attack", "an attack in the User-Agent or Referer", "rce", "critical"),
@@ -320,7 +339,7 @@ export function jndi(s, where = "") {
   return null;
 }
 
-const hit = (id, extra) => { const s = BYID.get(id) || BYID.get("header-attack"); return { id: s.id, sev: extra?.sev || s.sev, cat: s.cat, cve: s.cve, probe: s.probe, why: extra?.why }; };
+const hit = (id, extra) => { const s = BYID.get(id) || BYID.get("header-attack"); return { id: s.id, sev: extra?.sev || s.sev, cat: s.cat, cve: extra?.cve || s.cve, probe: s.probe, why: extra?.why }; };
 // Per surface, every signature regex in one literal automaton (matcher.mjs):
 // a string with none of their literals costs one pass, and only the regexes
 // whose literal is there are asked.
@@ -389,7 +408,10 @@ function target(raw) {
   for (const [k, v] of items) {
     if (k.length > 1 && /['"`<(;$\[{]/.test(k)) { keep(sqlHit(sqli(k))); keep(D.nosql(k, "")); }
     if (!v || v.length < 2) { if (k.indexOf("$") >= 0) keep(D.nosql(k, "")); continue; }
+    // a token (?access_token=eyJ…): its header says how it wants to be checked
+    if (v.charCodeAt(0) === 101 && v.startsWith("eyJ")) { const j = D.jwt(v, `in ${k.slice(0, 30)}`); if (j) { keep(j); continue; } }
     if (opaqueValue(v)) { keep(D.deser(v)); continue; }
+    if (k === "query") keep(D.graphql(v));
     keep(sqlHit(sqli(v)));
     if (PLAIN.test(v)) { if (CMD_NAME.test(k)) keep(D.shell(v, k)); continue; }      // words and digits: SQL maybe, never script or a URL
     keep(xssHit(xss(v)));
@@ -478,7 +500,7 @@ export function verdictOf(hits) {
 const look = { jndi, sqli };
 const VOLATILE_HINT = /=[0-9a-f]{6}/i;
 const VOLATILE = /=(?:\d{6,24}|(?!aced)[0-9a-f]{12,64}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?=&|$)/gi;
-export function inspect({ method, path, ua, referer, headers } = {}) {
+export function inspect({ method, path, ua, referer, headers, proto, host } = {}) {
   const p = String(path || "");
   // long targets aren't kept: an attacker's unique URLs would fill the cache. Numbers,
   // hex and UUIDs in the query (cache busters, ids, timestamps) can't carry anything,
@@ -488,7 +510,7 @@ export function inspect({ method, path, ua, referer, headers } = {}) {
   if (t && !t.length) t = null;
   const u = ua === undefined ? null : String(ua).length > 400 ? header(String(ua), "ua") : cached(cacheU, ua || "", () => header(String(ua || ""), "ua"), 2048);
   const r = referer && /[$(<'"`{;|]|oast|interact|burpcollab/i.test(referer) ? header(String(referer), "ref") : null;
-  const hh = headers ? D.headers(headers, look).map((x) => hit(x.id, x)) : null;
+  const hh = headers ? D.headers(headers, look, { method, proto, path: p, host }).map((x) => hit(x.id, x)) : null;
   const mk = methodKind(method);
   if (!t && !(u && u.length) && !(r && r.length) && !(hh && hh.length) && mk < 2) return NONE;
   const hits = [...(t || []), ...(u || []), ...(r || []), ...(hh || [])];
